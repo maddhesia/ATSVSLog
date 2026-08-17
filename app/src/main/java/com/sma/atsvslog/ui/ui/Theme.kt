@@ -1,6 +1,5 @@
-package com.sma.atsvslog.ui.theme
+package com.sma.atsvslog.ui.ui
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme

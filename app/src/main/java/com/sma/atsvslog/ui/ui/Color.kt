@@ -1,4 +1,4 @@
-package com.sma.atsvslog.ui.theme
+package com.sma.atsvslog.ui.ui
 
 import androidx.compose.ui.graphics.Color
 

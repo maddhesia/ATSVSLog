@@ -11,7 +11,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import com.sma.atsvslog.ui.theme.ATSVSLogTheme
+import com.sma.atsvslog.ui.ui.ATSVSLogTheme
 
 class MainActivity : ComponentActivity() {
 
