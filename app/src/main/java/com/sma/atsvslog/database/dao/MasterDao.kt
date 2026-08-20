@@ -8,6 +8,11 @@ import androidx.room.Update
 import com.sma.atsvslog.database.entity.MasterEntity
 import kotlinx.coroutines.flow.Flow
 
+data class ModelAssignment(
+    val type: String,
+    val brand: String
+)
+
 @Dao
 interface MasterDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -16,21 +21,42 @@ interface MasterDao {
     @Update
     suspend fun update(master: MasterEntity)
 
+    @Query("SELECT * FROM masters ORDER BY model COLLATE NOCASE, lastSoldAt DESC")
+    suspend fun getAllMasters(): List<MasterEntity>
+
+    @Query("DELETE FROM masters")
+    suspend fun deleteAll()
+
     @Query("SELECT DISTINCT type FROM masters ORDER BY type COLLATE NOCASE")
     fun observeTypes(): Flow<List<String>>
 
-    @Query("SELECT DISTINCT model FROM masters WHERE brand = :brand ORDER BY model COLLATE NOCASE")
-    fun observeModels(brand: String): Flow<List<String>>
+    @Query("""
+        SELECT DISTINCT model FROM masters
+        WHERE type = :type AND brand = :brand
+        ORDER BY model COLLATE NOCASE
+    """)
+    fun observeModels(type: String, brand: String): Flow<List<String>>
 
     @Query("""
         SELECT DISTINCT size FROM masters
-        WHERE brand = :brand AND model = :model
+        WHERE model = :model COLLATE NOCASE
         ORDER BY size COLLATE NOCASE
     """)
-    fun observeSizes(brand: String, model: String): Flow<List<String>>
+    fun observeSizes(model: String): Flow<List<String>>
 
-    @Query("SELECT DISTINCT colour FROM masters ORDER BY colour COLLATE NOCASE")
-    fun observeColours(): Flow<List<String>>
+    @Query("""
+        SELECT DISTINCT colour FROM masters
+        WHERE model = :model COLLATE NOCASE
+        ORDER BY colour COLLATE NOCASE
+    """)
+    fun observeColours(model: String): Flow<List<String>>
+
+    @Query("""
+        SELECT DISTINCT type, brand
+        FROM masters
+        WHERE model = :model COLLATE NOCASE
+    """)
+    suspend fun findModelAssignments(model: String): List<ModelAssignment>
 
     @Query("""
         SELECT * FROM masters

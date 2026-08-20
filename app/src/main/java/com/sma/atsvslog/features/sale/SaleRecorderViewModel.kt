@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -51,6 +52,7 @@ class SaleRecorderViewModel(
 
     val uiState: StateFlow<SaleRecorderUiState> = _uiState.asStateFlow()
 
+    private val typeFlow = MutableStateFlow("")
     private val brandFlow = MutableStateFlow("")
 
     init {
@@ -70,12 +72,15 @@ class SaleRecorderViewModel(
         }
 
         viewModelScope.launch {
-            brandFlow
-                .flatMapLatest { brand ->
-                    if (brand.isBlank()) {
+            combine(typeFlow, brandFlow) { type, brand ->
+                type to brand
+            }
+                .distinctUntilChanged()
+                .flatMapLatest { (type, brand) ->
+                    if (type.isBlank() || type == ENTER_NEW || brand.isBlank()) {
                         kotlinx.coroutines.flow.flowOf(emptyList())
                     } else {
-                        repository.observeModels(brand)
+                        repository.observeModels(type, brand)
                     }
                 }
                 .collect { values ->
@@ -86,19 +91,14 @@ class SaleRecorderViewModel(
         }
 
         viewModelScope.launch {
-            combine(brandFlow, _uiState) { brand, state ->
-                brand to state.model
-            }
+            _uiState
+                .map { it.model }
                 .distinctUntilChanged()
-                .flatMapLatest { (brand, model) ->
-                    if (
-                        brand.isBlank() ||
-                        model.isBlank() ||
-                        model == ENTER_NEW
-                    ) {
+                .flatMapLatest { model ->
+                    if (model.isBlank() || model == ENTER_NEW) {
                         kotlinx.coroutines.flow.flowOf(emptyList())
                     } else {
-                        repository.observeSizes(brand, model)
+                        repository.observeSizes(model)
                     }
                 }
                 .collect { values ->
@@ -109,37 +109,61 @@ class SaleRecorderViewModel(
         }
 
         viewModelScope.launch {
-            repository.observeColours().collect { values ->
-                _uiState.update {
-                    it.copy(colours = values)
+            _uiState
+                .map { it.model }
+                .distinctUntilChanged()
+                .flatMapLatest { model ->
+                    if (model.isBlank() || model == ENTER_NEW) {
+                        kotlinx.coroutines.flow.flowOf(emptyList())
+                    } else {
+                        repository.observeColours(model)
+                    }
                 }
-            }
+                .collect { values ->
+                    _uiState.update {
+                        it.copy(colours = values)
+                    }
+                }
         }
     }
 
     fun onTypeSelected(value: String) {
-        if (value == ENTER_NEW) {
-            _uiState.update {
-                it.copy(
-                    type = ENTER_NEW,
-                    customType = ""
-                )
-            }
-        } else {
-            _uiState.update {
-                it.copy(
-                    type = value,
-                    customType = ""
-                )
-            }
+        typeFlow.value = if (value == ENTER_NEW) "" else value
+
+        _uiState.update {
+            it.copy(
+                type = value,
+                customType = "",
+                model = "",
+                size = "Not Specified",
+                colour = "",
+                customModel = "",
+                customSize = "",
+                customColour = "",
+                sellingPrice = "",
+                models = emptyList(),
+                sizes = emptyList(),
+                colours = emptyList()
+            )
         }
     }
 
     fun onCustomTypeChanged(value: String) {
+        typeFlow.value = ""
         _uiState.update {
             it.copy(
                 type = ENTER_NEW,
-                customType = value
+                customType = value,
+                model = "",
+                size = "Not Specified",
+                colour = "",
+                customModel = "",
+                customSize = "",
+                customColour = "",
+                sellingPrice = "",
+                models = emptyList(),
+                sizes = emptyList(),
+                colours = emptyList()
             )
         }
     }
@@ -158,7 +182,8 @@ class SaleRecorderViewModel(
                 customColour = "",
                 sellingPrice = "",
                 models = emptyList(),
-                sizes = emptyList()
+                sizes = emptyList(),
+                colours = emptyList()
             )
         }
     }

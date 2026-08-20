@@ -63,6 +63,18 @@ class LocalSalesRepository(
         }
 
         database.withTransaction {
+            val assignments = masterDao.findModelAssignments(draft.model)
+            val conflictingAssignment = assignments.firstOrNull {
+                it.type != draft.type || it.brand != draft.brand
+            }
+            if (conflictingAssignment != null) {
+                throw IllegalArgumentException(
+                    "Model \"${draft.model}\" already belongs to " +
+                        "${conflictingAssignment.brand} ${conflictingAssignment.type}. " +
+                        "Each model name must represent one merchandise only."
+                )
+            }
+
             val item = TransactionItemEntity(
                 itemUuid = UUID.randomUUID().toString(),
                 transactionUuid = transactionUuid,
@@ -147,14 +159,53 @@ class LocalSalesRepository(
     fun observeTypes(): Flow<List<String>> =
         masterDao.observeTypes()
 
-    fun observeModels(brand: String): Flow<List<String>> =
-        masterDao.observeModels(brand)
+    fun observeModels(type: String, brand: String): Flow<List<String>> =
+        masterDao.observeModels(type, brand)
 
-    fun observeSizes(brand: String, model: String): Flow<List<String>> =
-        masterDao.observeSizes(brand, model)
+    fun observeSizes(model: String): Flow<List<String>> =
+        masterDao.observeSizes(model)
 
-    fun observeColours(): Flow<List<String>> =
-        masterDao.observeColours()
+    fun observeColours(model: String): Flow<List<String>> =
+        masterDao.observeColours(model)
+
+    /**
+     * Development-only catalogue cleanup used for the Milestone 4 test database.
+     *
+     * Keeps one canonical master row per model, choosing the most recently
+     * sold/updated assignment when legacy test data contains conflicting
+     * Type + Brand ownership. Existing transaction history is untouched.
+     *
+     * Size and Colour are deliberately reset to "Enter New" so the next
+     * test run can build the variant catalogue from a clean state.
+     */
+    suspend fun resetDevelopmentMasterVariants() {
+        database.withTransaction {
+            val masters = masterDao.getAllMasters()
+
+            val canonicalByModel = masters
+                .groupBy { it.model.trim().lowercase() }
+                .values
+                .mapNotNull { rows ->
+                    rows.maxWithOrNull(
+                        compareBy<MasterEntity> {
+                            it.lastSoldAt ?: Long.MIN_VALUE
+                        }.thenBy { it.localId }
+                    )
+                }
+
+            masterDao.deleteAll()
+
+            canonicalByModel.forEach { master ->
+                masterDao.insert(
+                    master.copy(
+                        localId = 0,
+                        size = ENTER_NEW,
+                        colour = ENTER_NEW
+                    )
+                )
+            }
+        }
+    }
 
     private suspend fun ensureCounter(date: String, now: Long) {
         counterDao.insertIfMissing(
@@ -199,3 +250,5 @@ class LocalSalesRepository(
         }
     }
 }
+
+private const val ENTER_NEW = "Enter New"

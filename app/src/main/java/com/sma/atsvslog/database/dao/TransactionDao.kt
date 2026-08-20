@@ -29,4 +29,11 @@ interface TransactionDao {
         LIMIT 1
     """)
     suspend fun findByUuid(transactionUuid: String): TransactionEntity?
+
+    @Query("""
+        DELETE FROM transactions
+        WHERE transactionUuid = :transactionUuid
+          AND completedAt IS NULL
+    """)
+    suspend fun deleteUnfinished(transactionUuid: String): Int
 }

@@ -91,12 +91,13 @@ fun SaleRecorderScreen(
             onExpandedChange = {
                 typeExpanded = !typeExpanded
             },
-            options = listOf(
-                "Trolley Bag",
-                "Duffel Bag",
-                "Backpack",
-                ENTER_NEW
-            ),
+            options = (
+                listOf(
+                    "Trolley Bag",
+                    "Duffel Bag",
+                    "Backpack"
+                ) + state.types + ENTER_NEW
+            ).distinct(),
             onOptionSelected = {
                 onTypeSelected(it)
                 typeExpanded = false
