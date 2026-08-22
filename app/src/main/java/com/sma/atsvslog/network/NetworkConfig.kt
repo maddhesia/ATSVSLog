@@ -3,7 +3,7 @@ package com.sma.atsvslog.network
 data class NetworkConfig(
     val baseUrl: String,
     val apiKey: String? = null,
-    val apiKeyHeaderName: String = DEFAULT_API_KEY_HEADER,
+    val apiKeyParameterName: String = DEFAULT_API_KEY_PARAMETER,
     val connectTimeoutSeconds: Long = 10,
     val readTimeoutSeconds: Long = 20,
     val writeTimeoutSeconds: Long = 20
@@ -16,9 +16,9 @@ data class NetworkConfig(
         require(readTimeoutSeconds > 0)
         require(writeTimeoutSeconds > 0)
         if (apiKey != null) {
-            require(apiKeyHeaderName.isNotBlank())
+            require(apiKeyParameterName.isNotBlank())
         }
     }
 }
 
-const val DEFAULT_API_KEY_HEADER = "X-API-Key"
+const val DEFAULT_API_KEY_PARAMETER = "apiKey"

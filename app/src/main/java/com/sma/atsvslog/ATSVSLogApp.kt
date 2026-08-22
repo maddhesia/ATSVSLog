@@ -4,11 +4,40 @@ import android.app.Application
 import android.content.pm.ApplicationInfo
 import com.sma.atsvslog.di.DatabaseProvider
 import com.sma.atsvslog.repository.LocalSalesRepository
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class ATSVSLogApp : Application() {
+    private fun testBetaNetwork() {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val response = BetaNetwork.client.api.health()
 
+                if (response.isSuccessful) {
+                    val body = response.body()
+
+                    Log.i(
+                        "ATSVS_BETA",
+                        "BETA HEALTH SUCCESS: ${body?.message}"
+                    )
+                } else {
+                    Log.e(
+                        "ATSVS_BETA",
+                        "BETA HEALTH HTTP ERROR: ${response.code()}"
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(
+                    "ATSVS_BETA",
+                    "BETA HEALTH FAILED",
+                    e
+                )
+            }
+        }
+    }
     override fun onCreate() {
         super.onCreate()
 
@@ -35,5 +64,6 @@ class ATSVSLogApp : Application() {
         }
 
         println("ATSVSLog Application Started")
+        testBetaNetwork()
     }
 }

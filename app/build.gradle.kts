@@ -36,7 +36,13 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
 }
+
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))

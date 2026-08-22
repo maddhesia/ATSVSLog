@@ -1,10 +1,13 @@
 package com.sma.atsvslog.network
 
+import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.sma.atsvslog.network.dto.ACTION_REPORT
 import com.sma.atsvslog.network.dto.ACTION_SYNC
 import com.sma.atsvslog.network.dto.API_VERSION
 import com.sma.atsvslog.network.dto.ApiRequest
+import com.sma.atsvslog.network.dto.SaleSyncItem
+import com.sma.atsvslog.network.dto.SaleSyncPayload
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
@@ -20,6 +23,14 @@ import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 
+/**
+ * Milestone 6 Fix 1 — updated for the anonymous-routing correction
+ * (ADR-M6-002). Every operation now hits the same literal relative path
+ * ("exec" — the base URL is the deployment's parent directory, so the
+ * resolved request is server-root + "/exec", not "/") and is
+ * distinguished by the `op` query parameter (GET) or the envelope's
+ * `action` field (POST) instead of a distinct URL path per operation.
+ */
 class AtSvsNetworkContractTest {
 
     private lateinit var server: MockWebServer
@@ -53,10 +64,7 @@ class AtSvsNetworkContractTest {
             payload = payload
         )
 
-        val response = client.api.sync(
-            path = server.url("/sync").toString(),
-            request = request
-        )
+        val response = client.api.sync(request = request)
 
         assertTrue(response.isSuccessful)
         assertNotNull(response.body())
@@ -66,15 +74,20 @@ class AtSvsNetworkContractTest {
         val recorded = server.takeRequest()
 
         assertEquals("POST", recorded.method)
-        assertEquals("/sync", recorded.path)
-        assertEquals("test-secret", recorded.getHeader("X-API-Key"))
+        assertEquals("/exec", recorded.requestUrl?.encodedPath)
+        assertEquals(
+            "test-secret",
+            recorded.requestUrl!!.queryParameter("apiKey")
+        )
 
         val body = recorded.body.readUtf8()
 
         assertTrue(body.contains("\"apiVersion\":1"))
         assertTrue(body.contains("\"requestId\":\"request-123\""))
         assertTrue(body.contains("\"action\":\"SYNC\""))
-        assertTrue(body.contains("\"futureField\":\"owned-by-final-contract\""))
+        assertTrue(
+            body.contains("\"futureField\":\"owned-by-final-contract\"")
+        )
     }
 
     @Test
@@ -83,17 +96,21 @@ class AtSvsNetworkContractTest {
 
         val client = client()
 
-        val response = client.api.health(
-            path = server.url("/health").toString()
-        )
+        val response = client.api.health()
 
         assertTrue(response.isSuccessful)
 
         val recorded = server.takeRequest()
 
         assertEquals("GET", recorded.method)
-        assertEquals("/health", recorded.path)
-        assertNull(recorded.getHeader("X-API-Key"))
+        assertEquals("/exec", recorded.requestUrl?.encodedPath)
+        assertEquals(
+            "health",
+            recorded.requestUrl!!.queryParameter("op")
+        )
+        assertNull(
+            recorded.requestUrl!!.queryParameter("apiKey")
+        )
     }
 
     @Test
@@ -110,21 +127,15 @@ class AtSvsNetworkContractTest {
 
             val client = client(apiKey = "test-secret")
 
-            val healthResponse = client.api.health(
-                path = server.url("/health").toString()
-            )
+            val healthResponse = client.api.health()
 
             val syncResponse = client.api.sync(
-                path = server.url("/sync").toString(),
                 request = requestFor(ACTION_SYNC)
             )
 
-            val mastersResponse = client.api.masters(
-                path = server.url("/masters").toString()
-            )
+            val mastersResponse = client.api.masters()
 
             val reportResponse = client.api.report(
-                path = server.url("/report").toString(),
                 request = requestFor(ACTION_REPORT)
             )
 
@@ -133,55 +144,159 @@ class AtSvsNetworkContractTest {
             assertTrue(mastersResponse.isSuccessful)
             assertTrue(reportResponse.isSuccessful)
 
-            assertEquals("SUCCESS", healthResponse.body()?.statusCode)
-            assertEquals("SUCCESS", syncResponse.body()?.statusCode)
-            assertEquals("SUCCESS", mastersResponse.body()?.statusCode)
-            assertEquals("SUCCESS", reportResponse.body()?.statusCode)
+            assertEquals(
+                "SUCCESS",
+                healthResponse.body()?.statusCode
+            )
+
+            assertEquals(
+                "SUCCESS",
+                syncResponse.body()?.statusCode
+            )
+
+            assertEquals(
+                "SUCCESS",
+                mastersResponse.body()?.statusCode
+            )
+
+            assertEquals(
+                "SUCCESS",
+                reportResponse.body()?.statusCode
+            )
 
             val healthRequest = server.takeRequest()
+
             assertEquals("GET", healthRequest.method)
-            assertEquals("/health", healthRequest.path)
+            assertEquals("/exec", healthRequest.requestUrl?.encodedPath)
+            assertEquals(
+                "health",
+                healthRequest.requestUrl!!.queryParameter("op")
+            )
 
             val syncRequest = server.takeRequest()
+
             assertEquals("POST", syncRequest.method)
-            assertEquals("/sync", syncRequest.path)
+            assertEquals("/exec", syncRequest.requestUrl?.encodedPath)
+
             assertTrue(
-                syncRequest.body.readUtf8().contains("\"action\":\"SYNC\"")
+                syncRequest.body
+                    .readUtf8()
+                    .contains("\"action\":\"SYNC\"")
             )
 
             val mastersRequest = server.takeRequest()
+
             assertEquals("GET", mastersRequest.method)
-            assertEquals("/masters", mastersRequest.path)
+            assertEquals("/exec", mastersRequest.requestUrl?.encodedPath)
+            assertEquals(
+                "masters",
+                mastersRequest.requestUrl!!.queryParameter("op")
+            )
 
             val reportRequest = server.takeRequest()
+
             assertEquals("POST", reportRequest.method)
-            assertEquals("/report", reportRequest.path)
+            assertEquals("/exec", reportRequest.requestUrl?.encodedPath)
+
             assertTrue(
-                reportRequest.body.readUtf8().contains("\"action\":\"REPORT\"")
+                reportRequest.body
+                    .readUtf8()
+                    .contains("\"action\":\"REPORT\"")
             )
 
             assertEquals(
                 "test-secret",
-                healthRequest.getHeader("X-API-Key")
+                healthRequest.requestUrl!!
+                    .queryParameter("apiKey")
             )
+
             assertEquals(
                 "test-secret",
-                syncRequest.getHeader("X-API-Key")
+                syncRequest.requestUrl!!
+                    .queryParameter("apiKey")
             )
+
             assertEquals(
                 "test-secret",
-                mastersRequest.getHeader("X-API-Key")
+                mastersRequest.requestUrl!!
+                    .queryParameter("apiKey")
             )
+
             assertEquals(
                 "test-secret",
-                reportRequest.getHeader("X-API-Key")
+                reportRequest.requestUrl!!
+                    .queryParameter("apiKey")
             )
         }
 
     @Test
+    fun salePayload_serializesFrozenFieldLevelContract() = runBlocking {
+        server.enqueue(successResponse())
+
+        val client = client(apiKey = "test-secret")
+
+        val payload = SaleSyncPayload(
+            eventUuid = "event-001",
+            transactionUuid = "txn-001",
+            transactionDate = "2026-08-21",
+            completedAt = "2026-08-21T12:00:00Z",
+            items = listOf(
+                SaleSyncItem(
+                    itemUuid = "item-001",
+                    type = "Duffle Bag",
+                    brand = "Kamiliant",
+                    model = "Raptor",
+                    size = "M",
+                    colour = "Black",
+                    sellingPrice = 1599L
+                )
+            )
+        )
+
+        val request = ApiRequestFactory.create(
+            action = ACTION_SYNC,
+            payload = Gson()
+                .toJsonTree(payload)
+                .asJsonObject,
+            requestId = "request-001",
+            timestamp = "2026-08-21T12:00:01Z"
+        )
+
+        client.api.sync(request = request)
+
+        val body = server
+            .takeRequest()
+            .body
+            .readUtf8()
+
+        assertTrue(
+            body.contains("\"eventUuid\":\"event-001\"")
+        )
+
+        assertTrue(
+            body.contains("\"eventType\":\"SALE\"")
+        )
+
+        assertTrue(
+            body.contains("\"transactionUuid\":\"txn-001\"")
+        )
+
+        assertTrue(
+            body.contains("\"itemUuid\":\"item-001\"")
+        )
+
+        assertTrue(
+            body.contains("\"sellingPrice\":1599")
+        )
+    }
+
+    @Test
     fun requestFactory_createsFrozenEnvelope_withoutDefiningBusinessPayload() {
         val payload = JsonObject().apply {
-            addProperty("arbitraryFutureField", "value-123")
+            addProperty(
+                "arbitraryFutureField",
+                "value-123"
+            )
         }
 
         val request = ApiRequestFactory.create(
@@ -191,100 +306,136 @@ class AtSvsNetworkContractTest {
             timestamp = "2026-08-20T12:00:00Z"
         )
 
-        assertEquals(API_VERSION, request.apiVersion)
-        assertEquals("factory-request-001", request.requestId)
-        assertEquals(ACTION_SYNC, request.action)
+        assertEquals(
+            API_VERSION,
+            request.apiVersion
+        )
+
+        assertEquals(
+            "factory-request-001",
+            request.requestId
+        )
+
+        assertEquals(
+            ACTION_SYNC,
+            request.action
+        )
+
         assertEquals(
             "2026-08-20T12:00:00Z",
             request.timestamp
         )
+
         assertEquals(
             "value-123",
-            request.payload.get("arbitraryFutureField").asString
+            request.payload
+                .get("arbitraryFutureField")
+                .asString
         )
     }
 
     @Test
-    fun customApiKeyHeader_isHonoured() = runBlocking {
+    fun customApiKeyParameter_isHonoured() = runBlocking {
         server.enqueue(successResponse())
 
         val client = AtSvsNetworkClient(
             NetworkConfig(
                 baseUrl = server.url("/").toString(),
                 apiKey = "custom-secret",
-                apiKeyHeaderName = "X-Custom-API-Key"
+                apiKeyParameterName = "customKey"
             )
         )
 
-        client.api.health(
-            path = server.url("/health").toString()
-        )
+        client.api.health()
 
         val recorded = server.takeRequest()
 
         assertEquals(
             "custom-secret",
-            recorded.getHeader("X-Custom-API-Key")
+            recorded.requestUrl!!
+                .queryParameter("customKey")
         )
+
         assertNull(
-            recorded.getHeader("X-API-Key")
+            recorded.requestUrl!!
+                .queryParameter("apiKey")
         )
     }
 
     @Test
-    fun responseEnvelope_preservesOptionalFields_andPayload() = runBlocking {
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(200)
-                .setHeader("Content-Type", "application/json")
-                .setBody(
-                    """
-                    {
-                      "success": false,
-                      "statusCode": "VALIDATION_ERROR",
-                      "message": "Invalid request",
-                      "serverTime": "2026-08-20T12:34:56Z",
-                      "apiVersion": 1,
-                      "payload": {
-                        "field": "requestId",
-                        "reason": "required"
-                      }
-                    }
-                    """.trimIndent()
-                )
-        )
+    fun responseEnvelope_preservesOptionalFields_andPayload() =
+        runBlocking {
 
-        val client = client()
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader(
+                        "Content-Type",
+                        "application/json"
+                    )
+                    .setBody(
+                        """
+                        {
+                          "success": false,
+                          "statusCode": "VALIDATION_ERROR",
+                          "message": "Invalid request",
+                          "serverTime": "2026-08-20T12:34:56Z",
+                          "apiVersion": 1,
+                          "payload": {
+                            "field": "requestId",
+                            "reason": "required"
+                          }
+                        }
+                        """.trimIndent()
+                    )
+            )
 
-        val response = client.api.health(
-            path = server.url("/health").toString()
-        )
+            val client = client()
 
-        assertTrue(response.isSuccessful)
-        assertNotNull(response.body())
+            val response = client.api.health()
 
-        val body = response.body()!!
+            assertTrue(response.isSuccessful)
+            assertNotNull(response.body())
 
-        assertFalse(body.success)
-        assertEquals("VALIDATION_ERROR", body.statusCode)
-        assertEquals("Invalid request", body.message)
-        assertEquals(
-            "2026-08-20T12:34:56Z",
-            body.serverTime
-        )
-        assertEquals(API_VERSION, body.apiVersion)
+            val body = response.body()!!
 
-        assertNotNull(body.payload)
+            assertFalse(body.success)
+            assertEquals(
+                "VALIDATION_ERROR",
+                body.statusCode
+            )
 
-        assertEquals(
-            "requestId",
-            body.payload?.get("field")?.asString
-        )
-        assertEquals(
-            "required",
-            body.payload?.get("reason")?.asString
-        )
-    }
+            assertEquals(
+                "Invalid request",
+                body.message
+            )
+
+            assertEquals(
+                "2026-08-20T12:34:56Z",
+                body.serverTime
+            )
+
+            assertEquals(
+                API_VERSION,
+                body.apiVersion
+            )
+
+            assertNotNull(body.payload)
+
+            assertEquals(
+                "requestId",
+                body.payload
+                    ?.get("field")
+                    ?.asString
+            )
+
+            assertEquals(
+                "required",
+                body.payload
+                    ?.get("reason")
+                    ?.asString
+            )
+        }
 
     @Test
     fun http500_isReturnedAsUnsuccessfulResponse_withoutThrowingTransportException() =
@@ -293,7 +444,10 @@ class AtSvsNetworkContractTest {
             server.enqueue(
                 MockResponse()
                     .setResponseCode(500)
-                    .setHeader("Content-Type", "application/json")
+                    .setHeader(
+                        "Content-Type",
+                        "application/json"
+                    )
                     .setBody(
                         """
                         {
@@ -310,9 +464,7 @@ class AtSvsNetworkContractTest {
 
             val client = client()
 
-            val response = client.api.health(
-                path = server.url("/health").toString()
-            )
+            val response = client.api.health()
 
             assertFalse(response.isSuccessful)
             assertEquals(500, response.code())
@@ -320,44 +472,55 @@ class AtSvsNetworkContractTest {
         }
 
     @Test
-    fun http401_isReturnedAsUnsuccessfulResponse() = runBlocking {
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(401)
-                .setHeader("Content-Type", "application/json")
-                .setBody(
-                    """
-                    {
-                      "success": false,
-                      "statusCode": "UNAUTHORIZED",
-                      "message": "Invalid API key",
-                      "serverTime": "2026-08-20T12:00:00Z",
-                      "apiVersion": 1,
-                      "payload": {}
-                    }
-                    """.trimIndent()
-                )
-        )
+    fun http401_isReturnedAsUnsuccessfulResponse() =
+        runBlocking {
 
-        val client = client(apiKey = "wrong-key")
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(401)
+                    .setHeader(
+                        "Content-Type",
+                        "application/json"
+                    )
+                    .setBody(
+                        """
+                        {
+                          "success": false,
+                          "statusCode": "UNAUTHORIZED",
+                          "message": "Invalid API key",
+                          "serverTime": "2026-08-20T12:00:00Z",
+                          "apiVersion": 1,
+                          "payload": {}
+                        }
+                        """.trimIndent()
+                    )
+            )
 
-        val response = client.api.health(
-            path = server.url("/health").toString()
-        )
+            val client = client(
+                apiKey = "wrong-key"
+            )
 
-        assertFalse(response.isSuccessful)
-        assertEquals(401, response.code())
-        assertNotNull(response.errorBody())
-    }
+            val response = client.api.health()
+
+            assertFalse(response.isSuccessful)
+            assertEquals(401, response.code())
+            assertNotNull(response.errorBody())
+        }
 
     @Test
     fun readTimeout_producesIOException() {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
-                .setHeader("Content-Type", "application/json")
+                .setHeader(
+                    "Content-Type",
+                    "application/json"
+                )
                 .setBody(successBody())
-                .setBodyDelay(1500, TimeUnit.MILLISECONDS)
+                .setBodyDelay(
+                    1500,
+                    TimeUnit.MILLISECONDS
+                )
         )
 
         val client = AtSvsNetworkClient(
@@ -369,9 +532,7 @@ class AtSvsNetworkContractTest {
 
         assertThrows(IOException::class.java) {
             runBlocking {
-                client.api.health(
-                    path = server.url("/health").toString()
-                )
+                client.api.health()
             }
         }
     }
@@ -381,7 +542,10 @@ class AtSvsNetworkContractTest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
-                .setHeader("Content-Type", "application/json")
+                .setHeader(
+                    "Content-Type",
+                    "application/json"
+                )
                 .setBody(
                     """
                     {
@@ -395,16 +559,16 @@ class AtSvsNetworkContractTest {
 
         assertThrows(Exception::class.java) {
             runBlocking {
-                client.api.health(
-                    path = server.url("/health").toString()
-                )
+                client.api.health()
             }
         }
     }
 
     @Test
     fun invalidBaseUrl_isRejectedImmediately() {
-        assertThrows(IllegalArgumentException::class.java) {
+        assertThrows(
+            IllegalArgumentException::class.java
+        ) {
             NetworkConfig(
                 baseUrl = "https://example.com/api"
             )
@@ -430,7 +594,10 @@ class AtSvsNetworkContractTest {
             action = action,
             timestamp = "2026-08-20T12:00:00Z",
             payload = JsonObject().apply {
-                addProperty("testField", "testValue")
+                addProperty(
+                    "testField",
+                    "testValue"
+                )
             }
         )
 
@@ -439,8 +606,13 @@ class AtSvsNetworkContractTest {
     ): MockResponse =
         MockResponse()
             .setResponseCode(200)
-            .setHeader("Content-Type", "application/json")
-            .setBody(successBody(message))
+            .setHeader(
+                "Content-Type",
+                "application/json"
+            )
+            .setBody(
+                successBody(message)
+            )
 
     private fun successBody(
         message: String = "accepted"
