@@ -4,8 +4,12 @@ import androidx.room.withTransaction
 import com.sma.atsvslog.database.ATSVSLogDatabase
 import com.sma.atsvslog.database.entity.DailyCounterEntity
 import com.sma.atsvslog.database.entity.MasterEntity
+import com.sma.atsvslog.database.entity.SyncQueueEntity
 import com.sma.atsvslog.database.entity.TransactionEntity
 import com.sma.atsvslog.database.entity.TransactionItemEntity
+import com.sma.atsvslog.network.SyncPayloadFactory
+import com.sma.atsvslog.network.dto.EVENT_TYPE_SALE
+import com.sma.atsvslog.network.dto.EVENT_TYPE_WALK_IN
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
 
@@ -25,6 +29,7 @@ class LocalSalesRepository(
     private val itemDao = database.transactionItemDao()
     private val counterDao = database.dailyCounterDao()
     private val masterDao = database.masterDao()
+    private val syncQueueDao = database.syncQueueDao()
 
     fun observeTransactions(date: String): Flow<List<TransactionEntity>> =
         transactionDao.observeByDate(date)
@@ -91,6 +96,12 @@ class LocalSalesRepository(
         }
     }
 
+    /**
+     * Completes the customer transaction and, in the SAME Room transaction,
+     * creates the durable SALE SyncQueue event.
+     *
+     * No network call occurs here.
+     */
     suspend fun finishCustomer(
         transactionUuid: String,
         now: Long = System.currentTimeMillis()
@@ -103,7 +114,8 @@ class LocalSalesRepository(
                 "Transaction is already completed: $transactionUuid"
             }
 
-            require(itemDao.findForTransaction(transactionUuid).isNotEmpty()) {
+            val items = itemDao.findForTransaction(transactionUuid)
+            require(items.isNotEmpty()) {
                 "Cannot finish a customer without at least one saved item."
             }
 
@@ -113,6 +125,26 @@ class LocalSalesRepository(
 
             ensureCounter(transaction.transactionDate, now)
             counterDao.incrementConversions(transaction.transactionDate, now)
+
+            val (eventUuid, payload) = SyncPayloadFactory.createSalePayload(
+                transactionUuid = transaction.transactionUuid,
+                transactionDate = transaction.transactionDate,
+                completedAt = now,
+                items = items
+            )
+
+            syncQueueDao.insert(
+                SyncQueueEntity(
+                    eventUuid = eventUuid,
+                    eventType = EVENT_TYPE_SALE,
+                    payload = payload,
+                    status = SYNC_STATUS_PENDING,
+                    createdAt = now,
+                    lastAttemptAt = null,
+                    attemptCount = 0,
+                    lastErrorCode = null
+                )
+            )
         }
     }
 
@@ -123,6 +155,28 @@ class LocalSalesRepository(
         database.withTransaction {
             ensureCounter(date, now)
             counterDao.changeWalkIns(date, 1, now)
+
+            val resultingWalkIns = counterDao.find(date)?.walkIns
+                ?: error("Daily counter disappeared during walk-in increment.")
+
+            val (eventUuid, payload) =
+                SyncPayloadFactory.createWalkInIncrementPayload(
+                    businessDate = date,
+                    resultingWalkIns = resultingWalkIns
+                )
+
+            syncQueueDao.insert(
+                SyncQueueEntity(
+                    eventUuid = eventUuid,
+                    eventType = EVENT_TYPE_WALK_IN,
+                    payload = payload,
+                    status = SYNC_STATUS_PENDING,
+                    createdAt = now,
+                    lastAttemptAt = null,
+                    attemptCount = 0,
+                    lastErrorCode = null
+                )
+            )
         }
     }
 
@@ -132,9 +186,33 @@ class LocalSalesRepository(
     ) {
         database.withTransaction {
             ensureCounter(date, now)
+
             val current = counterDao.find(date) ?: return@withTransaction
+
             if (current.walkIns > 0) {
                 counterDao.changeWalkIns(date, -1, now)
+
+                val resultingWalkIns = counterDao.find(date)?.walkIns
+                    ?: error("Daily counter disappeared during walk-in decrement.")
+
+                val (eventUuid, payload) =
+                    SyncPayloadFactory.createWalkInDecrementPayload(
+                        businessDate = date,
+                        resultingWalkIns = resultingWalkIns
+                    )
+
+                syncQueueDao.insert(
+                    SyncQueueEntity(
+                        eventUuid = eventUuid,
+                        eventType = EVENT_TYPE_WALK_IN,
+                        payload = payload,
+                        status = SYNC_STATUS_PENDING,
+                        createdAt = now,
+                        lastAttemptAt = null,
+                        attemptCount = 0,
+                        lastErrorCode = null
+                    )
+                )
             }
         }
     }
@@ -146,6 +224,24 @@ class LocalSalesRepository(
         database.withTransaction {
             ensureCounter(date, now)
             counterDao.resetWalkIns(date, now)
+
+            val (eventUuid, payload) =
+                SyncPayloadFactory.createWalkInResetPayload(
+                    businessDate = date
+                )
+
+            syncQueueDao.insert(
+                SyncQueueEntity(
+                    eventUuid = eventUuid,
+                    eventType = EVENT_TYPE_WALK_IN,
+                    payload = payload,
+                    status = SYNC_STATUS_PENDING,
+                    createdAt = now,
+                    lastAttemptAt = null,
+                    attemptCount = 0,
+                    lastErrorCode = null
+                )
+            )
         }
     }
 
@@ -251,4 +347,5 @@ class LocalSalesRepository(
     }
 }
 
+private const val SYNC_STATUS_PENDING = "Pending"
 private const val ENTER_NEW = "Enter New"
