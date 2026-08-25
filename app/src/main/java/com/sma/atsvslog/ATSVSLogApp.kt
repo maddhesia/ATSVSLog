@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.pm.ApplicationInfo
 import com.sma.atsvslog.di.DatabaseProvider
 import com.sma.atsvslog.repository.LocalSalesRepository
+import com.sma.atsvslog.sync.SyncScheduler
 import kotlinx.coroutines.runBlocking
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -64,6 +65,9 @@ class ATSVSLogApp : Application() {
         }
 
         println("ATSVSLog Application Started")
+
+        SyncScheduler.ensurePeriodic(applicationContext)
+
         testBetaNetwork()
     }
 }

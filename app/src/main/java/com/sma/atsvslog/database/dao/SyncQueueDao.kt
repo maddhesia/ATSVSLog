@@ -26,4 +26,44 @@ interface SyncQueueDao {
 
     @Update
     suspend fun update(event: SyncQueueEntity)
+
+    @Query("""
+        UPDATE sync_queue
+        SET status = 'Synced',
+            lastAttemptAt = :attemptedAt,
+            lastErrorCode = NULL
+        WHERE queueLocalId = :queueLocalId
+    """)
+    suspend fun markSynced(
+        queueLocalId: Long,
+        attemptedAt: Long
+    )
+
+    @Query("""
+        UPDATE sync_queue
+        SET status = 'Pending',
+            lastAttemptAt = :attemptedAt,
+            attemptCount = attemptCount + 1,
+            lastErrorCode = :errorCode
+        WHERE queueLocalId = :queueLocalId
+    """)
+    suspend fun recordTemporaryFailure(
+        queueLocalId: Long,
+        attemptedAt: Long,
+        errorCode: String
+    )
+
+    @Query("""
+        UPDATE sync_queue
+        SET status = 'Failed',
+            lastAttemptAt = :attemptedAt,
+            attemptCount = attemptCount + 1,
+            lastErrorCode = :errorCode
+        WHERE queueLocalId = :queueLocalId
+    """)
+    suspend fun markFailed(
+        queueLocalId: Long,
+        attemptedAt: Long,
+        errorCode: String
+    )
 }

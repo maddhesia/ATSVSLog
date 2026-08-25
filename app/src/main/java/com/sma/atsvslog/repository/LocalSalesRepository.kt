@@ -23,7 +23,8 @@ data class SaleItemDraft(
 )
 
 class LocalSalesRepository(
-    private val database: ATSVSLogDatabase
+    private val database: ATSVSLogDatabase,
+    private val onQueueEvent: (() -> Unit)? = null
 ) {
     private val transactionDao = database.transactionDao()
     private val itemDao = database.transactionItemDao()
@@ -106,6 +107,8 @@ class LocalSalesRepository(
         transactionUuid: String,
         now: Long = System.currentTimeMillis()
     ) {
+        var queued = false
+
         database.withTransaction {
             val transaction = transactionDao.findByUuid(transactionUuid)
                 ?: error("Transaction does not exist: $transactionUuid")
@@ -145,6 +148,12 @@ class LocalSalesRepository(
                     lastErrorCode = null
                 )
             )
+
+            queued = true
+        }
+
+        if (queued) {
+            onQueueEvent?.invoke()
         }
     }
 
@@ -152,6 +161,8 @@ class LocalSalesRepository(
         date: String,
         now: Long = System.currentTimeMillis()
     ) {
+        var queued = false
+
         database.withTransaction {
             ensureCounter(date, now)
             counterDao.changeWalkIns(date, 1, now)
@@ -177,6 +188,12 @@ class LocalSalesRepository(
                     lastErrorCode = null
                 )
             )
+
+            queued = true
+        }
+
+        if (queued) {
+            onQueueEvent?.invoke()
         }
     }
 
@@ -184,6 +201,8 @@ class LocalSalesRepository(
         date: String,
         now: Long = System.currentTimeMillis()
     ) {
+        var queued = false
+
         database.withTransaction {
             ensureCounter(date, now)
 
@@ -213,7 +232,13 @@ class LocalSalesRepository(
                         lastErrorCode = null
                     )
                 )
+
+                queued = true
             }
+        }
+
+        if (queued) {
+            onQueueEvent?.invoke()
         }
     }
 
@@ -221,6 +246,8 @@ class LocalSalesRepository(
         date: String,
         now: Long = System.currentTimeMillis()
     ) {
+        var queued = false
+
         database.withTransaction {
             ensureCounter(date, now)
             counterDao.resetWalkIns(date, now)
@@ -242,6 +269,12 @@ class LocalSalesRepository(
                     lastErrorCode = null
                 )
             )
+
+            queued = true
+        }
+
+        if (queued) {
+            onQueueEvent?.invoke()
         }
     }
 

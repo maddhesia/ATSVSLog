@@ -20,13 +20,19 @@ import com.sma.atsvslog.features.home.HomeViewModel
 import com.sma.atsvslog.features.sale.SaleRecorderScreen
 import com.sma.atsvslog.features.sale.SaleRecorderViewModel
 import com.sma.atsvslog.repository.LocalSalesRepository
+import com.sma.atsvslog.sync.SyncScheduler
 import com.sma.atsvslog.ui.ui.ATSVSLogTheme
 import java.time.LocalDate
 
 class MainActivity : ComponentActivity() {
 
     private val database by lazy { DatabaseProvider.get(applicationContext) }
-    private val salesRepository by lazy { LocalSalesRepository(database) }
+
+    private val salesRepository by lazy {
+        LocalSalesRepository(database) {
+            SyncScheduler.enqueueImmediate(applicationContext)
+        }
+    }
 
     private var selectedDate by mutableStateOf(LocalDate.now().toString())
     private var showSaleRecorder by mutableStateOf(false)
