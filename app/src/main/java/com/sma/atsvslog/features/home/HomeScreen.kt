@@ -40,7 +40,8 @@ fun HomeScreen(
     onAddWalkIn: () -> Unit,
     onRemoveWalkIn: () -> Unit,
     onResetWalkIns: () -> Unit,
-    onRecordSale: () -> Unit
+    onRecordSale: () -> Unit,
+    onViewReport: () -> Unit
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
 
@@ -111,6 +112,15 @@ fun HomeScreen(
         )
 
         Spacer(modifier = Modifier.weight(1f))
+
+        OutlinedButton(
+            onClick = onViewReport,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+        ) {
+            Text("VIEW DAILY REPORT")
+        }
 
         Button(
             onClick = onRecordSale,
