@@ -80,7 +80,7 @@ fun ReportScreen(
                 HorizontalDivider()
 
                 Text(
-                    text = "Today's Sales",
+                    text = "Sales",
                     style = MaterialTheme.typography.titleMedium
                 )
 
@@ -97,14 +97,6 @@ fun ReportScreen(
 
                 MetricRow("Footfall", report.footfall.toString())
                 MetricRow("Conversions", report.conversions.toString())
-                MetricRow(
-                    "Conversion %",
-                    String.format(
-                        java.util.Locale.US,
-                        "%.1f%%",
-                        report.conversionPercent
-                    )
-                )
 
                 HorizontalDivider()
 
@@ -142,12 +134,20 @@ fun ReportScreen(
                     "Conversions",
                     report.monthToDate.conversions.toString()
                 )
+                MetricRow(
+                    "Conversion %",
+                    String.format(
+                        java.util.Locale.US,
+                        "%.1f%%",
+                        report.monthToDate.conversionPercent
+                    )
+                )
 
                 if (report.insights.isNotEmpty()) {
                     HorizontalDivider()
 
                     Text(
-                        text = "Today's Insights",
+                        text = "Insights",
                         style = MaterialTheme.typography.titleMedium
                     )
 

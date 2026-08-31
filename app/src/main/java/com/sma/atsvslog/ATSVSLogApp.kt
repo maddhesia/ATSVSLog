@@ -1,11 +1,9 @@
 package com.sma.atsvslog
 
 import android.app.Application
-import android.content.pm.ApplicationInfo
 import com.sma.atsvslog.di.DatabaseProvider
-import com.sma.atsvslog.repository.LocalSalesRepository
+import com.sma.atsvslog.repository.MasterBootstrapRepository
 import com.sma.atsvslog.sync.SyncScheduler
-import kotlinx.coroutines.runBlocking
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,31 +40,31 @@ class ATSVSLogApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
-            val preferences = getSharedPreferences(
-                "atsvslog_dev",
-                MODE_PRIVATE
-            )
-            val cleanupKey = "milestone4_master_variant_reset_20260820"
-
-            if (!preferences.getBoolean(cleanupKey, false)) {
-                runCatching {
-                    runBlocking(Dispatchers.IO) {
-                        LocalSalesRepository(
-                            DatabaseProvider.get(applicationContext)
-                        ).resetDevelopmentMasterVariants()
-                    }
-                }.onSuccess {
-                    preferences.edit()
-                        .putBoolean(cleanupKey, true)
-                        .apply()
-                }
-            }
-        }
-
         println("ATSVSLog Application Started")
 
         SyncScheduler.ensurePeriodic(applicationContext)
+
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching {
+                MasterBootstrapRepository(
+                    database = DatabaseProvider.get(applicationContext),
+                    api = BetaNetwork.client.api
+                ).bootstrap()
+            }.onSuccess { result ->
+                Log.i(
+                    "ATSVS_MASTER",
+                    "Master bootstrap complete: fetched=${result.fetched}, " +
+                        "inserted=${result.inserted}, alreadyPresent=${result.alreadyPresent}, " +
+                        "preservedLocalConflicts=${result.preservedLocalConflicts}"
+                )
+            }.onFailure { error ->
+                Log.w(
+                    "ATSVS_MASTER",
+                    "Master bootstrap unavailable; continuing with local cache",
+                    error
+                )
+            }
+        }
 
         testBetaNetwork()
     }

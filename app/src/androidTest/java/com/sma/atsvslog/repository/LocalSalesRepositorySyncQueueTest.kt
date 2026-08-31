@@ -69,8 +69,24 @@ class LocalSalesRepositorySyncQueueTest {
 
         assertNotNull(transaction?.completedAt)
 
-        val queued = database.syncQueueDao().findOldestPending()
+        val first = database.syncQueueDao().findOldestPending()
 
+        assertNotNull(first)
+        assertEquals("MASTER", first!!.eventType)
+        assertEquals("Pending", first.status)
+        assertEquals(0, first.attemptCount)
+        assertNotNull(first.eventUuid)
+
+        val masterJson = Gson().fromJson(
+            first.payload,
+            Map::class.java
+        )
+        assertEquals("MASTER", masterJson["eventType"])
+        assertEquals("Raptor", masterJson["model"])
+
+        database.syncQueueDao().update(first.copy(status = "Synced"))
+
+        val queued = database.syncQueueDao().findOldestPending()
         assertNotNull(queued)
         assertEquals("SALE", queued!!.eventType)
         assertEquals("Pending", queued.status)
@@ -87,6 +103,39 @@ class LocalSalesRepositorySyncQueueTest {
         assertEquals("2026-08-23", json["transactionDate"])
         assertNotNull(json["completedAt"])
         assertTrue((json["items"] as List<*>).isNotEmpty())
+    }
+
+    @Test
+    fun saveItem_newMaster_createsDurableMasterQueueEvent() = runBlocking {
+        val transactionUuid = repository.startTransaction(
+            date = "2026-08-23",
+            now = 10_000L
+        )
+
+        repository.saveItem(
+            transactionUuid = transactionUuid,
+            draft = SaleItemDraft(
+                type = "Duffle Bag",
+                brand = "Kamiliant",
+                model = "NewModel",
+                size = "55",
+                colour = "Blue",
+                sellingPrice = 2000L
+            ),
+            now = 11_000L
+        )
+
+        val queued = database.syncQueueDao().findOldestPending()
+        assertNotNull(queued)
+        assertEquals("MASTER", queued!!.eventType)
+
+        val json = Gson().fromJson(queued.payload, Map::class.java)
+        assertEquals("MASTER", json["eventType"])
+        assertEquals("Duffle Bag", json["type"])
+        assertEquals("Kamiliant", json["brand"])
+        assertEquals("NewModel", json["model"])
+        assertEquals("55", json["size"])
+        assertEquals("Blue", json["colour"])
     }
 
     @Test

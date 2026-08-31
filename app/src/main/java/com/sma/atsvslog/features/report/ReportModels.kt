@@ -39,5 +39,6 @@ data class MonthToDate(
     val kamSales: Long,
     val totalSales: Long,
     val footfall: Int,
-    val conversions: Int
+    val conversions: Int,
+    val conversionPercent: Double
 )

@@ -6,6 +6,7 @@ import com.sma.atsvslog.network.dto.SaleSyncItem
 import com.sma.atsvslog.network.dto.SaleSyncPayload
 import com.sma.atsvslog.network.dto.WalkInSyncPayload
 import com.sma.atsvslog.network.dto.WALK_IN_INCREMENT
+import com.sma.atsvslog.network.dto.MasterSyncPayload
 import com.sma.atsvslog.network.dto.WALK_IN_RESET
 import java.time.Instant
 import java.util.UUID
@@ -48,6 +49,26 @@ object SyncPayloadFactory {
                     sellingPrice = item.sellingPrice
                 )
             }
+        )
+
+        return eventUuid to gson.toJson(payload)
+    }
+
+    fun createMasterMutationPayload(
+        type: String,
+        brand: String,
+        model: String,
+        size: String,
+        colour: String,
+        eventUuid: String = UUID.randomUUID().toString()
+    ): Pair<String, String> {
+        val payload = MasterSyncPayload(
+            eventUuid = eventUuid,
+            type = type,
+            brand = brand,
+            model = model,
+            size = size,
+            colour = colour
         )
 
         return eventUuid to gson.toJson(payload)

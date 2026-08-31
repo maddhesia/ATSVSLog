@@ -10,6 +10,7 @@ import com.sma.atsvslog.database.entity.TransactionItemEntity
 import com.sma.atsvslog.network.SyncPayloadFactory
 import com.sma.atsvslog.network.dto.EVENT_TYPE_SALE
 import com.sma.atsvslog.network.dto.EVENT_TYPE_WALK_IN
+import com.sma.atsvslog.network.dto.EVENT_TYPE_MASTER
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
 
@@ -68,6 +69,8 @@ class LocalSalesRepository(
             "Transaction does not exist: $transactionUuid"
         }
 
+        var masterQueued = false
+
         database.withTransaction {
             val assignments = masterDao.findModelAssignments(draft.model)
             val conflictingAssignment = assignments.firstOrNull {
@@ -93,7 +96,14 @@ class LocalSalesRepository(
             )
 
             itemDao.insert(item)
-            upsertMasterFromSale(item, now)
+            if (upsertMasterFromSale(item, now)) {
+                enqueueMasterMutation(item, now)
+                masterQueued = true
+            }
+        }
+
+        if (masterQueued) {
+            onQueueEvent?.invoke()
         }
     }
 
@@ -297,45 +307,6 @@ class LocalSalesRepository(
     fun observeColours(model: String): Flow<List<String>> =
         masterDao.observeColours(model)
 
-    /**
-     * Development-only catalogue cleanup used for the Milestone 4 test database.
-     *
-     * Keeps one canonical master row per model, choosing the most recently
-     * sold/updated assignment when legacy test data contains conflicting
-     * Type + Brand ownership. Existing transaction history is untouched.
-     *
-     * Size and Colour are deliberately reset to "Enter New" so the next
-     * test run can build the variant catalogue from a clean state.
-     */
-    suspend fun resetDevelopmentMasterVariants() {
-        database.withTransaction {
-            val masters = masterDao.getAllMasters()
-
-            val canonicalByModel = masters
-                .groupBy { it.model.trim().lowercase() }
-                .values
-                .mapNotNull { rows ->
-                    rows.maxWithOrNull(
-                        compareBy<MasterEntity> {
-                            it.lastSoldAt ?: Long.MIN_VALUE
-                        }.thenBy { it.localId }
-                    )
-                }
-
-            masterDao.deleteAll()
-
-            canonicalByModel.forEach { master ->
-                masterDao.insert(
-                    master.copy(
-                        localId = 0,
-                        size = ENTER_NEW,
-                        colour = ENTER_NEW
-                    )
-                )
-            }
-        }
-    }
-
     private suspend fun ensureCounter(date: String, now: Long) {
         counterDao.insertIfMissing(
             DailyCounterEntity(
@@ -348,7 +319,7 @@ class LocalSalesRepository(
     private suspend fun upsertMasterFromSale(
         item: TransactionItemEntity,
         now: Long
-    ) {
+    ): Boolean {
         val existing = masterDao.findCombination(
             type = item.type,
             brand = item.brand,
@@ -369,14 +340,42 @@ class LocalSalesRepository(
                     lastSoldAt = now
                 )
             )
-        } else {
-            masterDao.update(
-                existing.copy(
-                    lastSellingPrice = item.sellingPrice,
-                    lastSoldAt = now
-                )
-            )
+            return true
         }
+
+        masterDao.update(
+            existing.copy(
+                lastSellingPrice = item.sellingPrice,
+                lastSoldAt = now
+            )
+        )
+        return false
+    }
+
+    private suspend fun enqueueMasterMutation(
+        item: TransactionItemEntity,
+        now: Long
+    ) {
+        val payload = SyncPayloadFactory.createMasterMutationPayload(
+            type = item.type,
+            brand = item.brand,
+            model = item.model,
+            size = item.size,
+            colour = item.colour
+        )
+
+        syncQueueDao.insert(
+            SyncQueueEntity(
+                eventUuid = payload.first,
+                eventType = EVENT_TYPE_MASTER,
+                payload = payload.second,
+                status = SYNC_STATUS_PENDING,
+                createdAt = now,
+                lastAttemptAt = null,
+                attemptCount = 0,
+                lastErrorCode = null
+            )
+        )
     }
 }
 

@@ -25,6 +25,16 @@ data class SaleSyncItem(
     val sellingPrice: Long
 )
 
+data class MasterSyncPayload(
+    val eventUuid: String,
+    val eventType: String = EVENT_TYPE_MASTER,
+    val type: String,
+    val brand: String,
+    val model: String,
+    val size: String,
+    val colour: String
+)
+
 data class WalkInSyncPayload(
     val eventUuid: String,
     val eventType: String = EVENT_TYPE_WALK_IN,
@@ -36,5 +46,6 @@ data class WalkInSyncPayload(
 
 const val EVENT_TYPE_SALE = "SALE"
 const val EVENT_TYPE_WALK_IN = "WALK_IN"
+const val EVENT_TYPE_MASTER = "MASTER"
 const val WALK_IN_INCREMENT = "INCREMENT"
 const val WALK_IN_RESET = "RESET"

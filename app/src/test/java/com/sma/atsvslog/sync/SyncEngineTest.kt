@@ -36,6 +36,31 @@ class SyncEngineTest {
     }
 
     @Test
+    fun masterEvent_usesSameFifoSyncPath_andMarksSynced() =
+        kotlinx.coroutines.runBlocking {
+            val item = event(
+                1,
+                "master-event-1",
+                """{"eventUuid":"master-event-1","eventType":"MASTER","model":"Raptor"}"""
+            )
+            val store = FakeQueueStore(item)
+            var sentPayload: JsonObject? = null
+
+            val result = SyncEngine(
+                queue = store,
+                send = { request ->
+                    sentPayload = request.payload
+                    Response.success(successResponse())
+                },
+                now = { 1500L }
+            ).run()
+
+            assertEquals(SyncRunResult.Drained, result)
+            assertEquals(listOf("master-event-1"), store.syncedEventUuids)
+            assertEquals("MASTER", sentPayload?.get("eventType")?.asString)
+        }
+
+    @Test
     fun idempotentDuplicate_isTreatedAsSynced() = kotlinx.coroutines.runBlocking {
         val item = event(1, "event-1", """{"eventUuid":"event-1","eventType":"SALE"}""")
         val store = FakeQueueStore(item)
