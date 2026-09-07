@@ -36,6 +36,15 @@ interface DailyCounterDao {
 
     @Query("""
         UPDATE daily_counters
+        SET conversions = conversions - 1,
+            updatedAt = :updatedAt
+        WHERE date = :date
+          AND conversions > 0
+    """)
+    suspend fun decrementConversions(date: String, updatedAt: Long): Int
+
+    @Query("""
+        UPDATE daily_counters
         SET walkIns = 0,
             updatedAt = :updatedAt
         WHERE date = :date

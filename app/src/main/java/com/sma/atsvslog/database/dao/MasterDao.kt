@@ -74,4 +74,16 @@ interface MasterDao {
         size: String,
         colour: String
     ): MasterEntity?
+
+    @Query("""
+        UPDATE masters
+        SET type = :newType,
+            brand = :newBrand
+        WHERE model = :model COLLATE NOCASE
+    """)
+    suspend fun reclassifyModel(
+        model: String,
+        newType: String,
+        newBrand: String
+    ): Int
 }

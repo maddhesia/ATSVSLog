@@ -13,19 +13,26 @@ import java.io.IOException
 /**
  * Implements the frozen Beta FIFO Sync Worker state machine.
  *
- * One queue item becomes exactly one SYNC HTTP request.
- * The durable eventUuid remains inside the payload; requestId is generated
- * separately for every HTTP attempt.
+ * M12 adds one explicit business-conflict hook: a server-side MASTER_CONFLICT
+ * is still a permanent failure in the queue state machine, but it is converted
+ * into the same durable MasterConflict workflow instead of remaining a silent
+ * Failed item. This preserves FIFO while giving the staff a resolution path.
  */
 class SyncEngine(
     private val queue: SyncQueueStore,
     private val send: suspend (ApiRequest<JsonObject>) -> Response<ApiResponse<JsonObject>>,
-    private val now: () -> Long = System::currentTimeMillis
+    private val now: () -> Long = System::currentTimeMillis,
+    private val onMasterConflict: suspend (event: SyncQueueEntity, details: MasterConflictDetails) -> Unit = { _, _ -> },
+    private val isBlockedByMasterConflict: suspend (event: SyncQueueEntity) -> Boolean = { false }
 ) {
     suspend fun run(): SyncRunResult {
         while (true) {
             val event = queue.oldestPending()
                 ?: return SyncRunResult.Drained
+
+            if (isBlockedByMasterConflict(event)) {
+                return SyncRunResult.BlockedByMasterConflict
+            }
 
             when (val outcome = deliver(event)) {
                 DeliveryOutcome.Success -> {
@@ -42,6 +49,16 @@ class SyncEngine(
                         errorCode = outcome.errorCode
                     )
                     return SyncRunResult.Retry
+                }
+
+                is DeliveryOutcome.MasterConflict -> {
+                    queue.markFailed(
+                        queueLocalId = event.queueLocalId,
+                        attemptedAt = now(),
+                        errorCode = "MASTER_CONFLICT"
+                    )
+                    onMasterConflict(event, outcome.details)
+                    return SyncRunResult.StoppedAfterPermanentFailure
                 }
 
                 is DeliveryOutcome.PermanentFailure -> {
@@ -82,6 +99,11 @@ class SyncEngine(
                     body == null ->
                         DeliveryOutcome.TemporaryFailure("EMPTY_RESPONSE")
 
+                    body.statusCode == "MASTER_CONFLICT" ->
+                        DeliveryOutcome.MasterConflict(
+                            MasterConflictDetails.from(body.payload, payload)
+                        )
+
                     body.statusCode in IDEMPOTENT_SUCCESS_CODES ->
                         DeliveryOutcome.Success
 
@@ -97,8 +119,6 @@ class SyncEngine(
         } catch (_: IOException) {
             DeliveryOutcome.TemporaryFailure("IO_EXCEPTION")
         } catch (_: Exception) {
-            // A transport/converter failure is not evidence that the business
-            // event is invalid. Leave it Pending and retry later.
             DeliveryOutcome.TemporaryFailure("NETWORK_EXCEPTION")
         }
     }
@@ -118,10 +138,43 @@ class SyncEngine(
         }
 }
 
+data class MasterConflictDetails(
+    val itemUuid: String,
+    val model: String,
+    val requestedType: String,
+    val requestedBrand: String,
+    val canonicalType: String,
+    val canonicalBrand: String,
+    val transactionUuid: String
+) {
+    companion object {
+        fun from(
+            responsePayload: JsonObject?,
+            requestPayload: JsonObject
+        ): MasterConflictDetails {
+            fun value(name: String): String =
+                responsePayload?.get(name)?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+
+            return MasterConflictDetails(
+                itemUuid = value("itemUuid").ifBlank {
+                    requestPayload.get("itemUuid")?.asString.orEmpty()
+                },
+                model = value("model").ifBlank { requestPayload.get("model")?.asString.orEmpty() },
+                requestedType = value("requestedType").ifBlank { requestPayload.get("type")?.asString.orEmpty() },
+                requestedBrand = value("requestedBrand").ifBlank { requestPayload.get("brand")?.asString.orEmpty() },
+                canonicalType = value("canonicalType"),
+                canonicalBrand = value("canonicalBrand"),
+                transactionUuid = requestPayload.get("transactionUuid")?.asString.orEmpty()
+            )
+        }
+    }
+}
+
 sealed interface SyncRunResult {
     data object Drained : SyncRunResult
     data object Retry : SyncRunResult
     data object StoppedAfterPermanentFailure : SyncRunResult
+    data object BlockedByMasterConflict : SyncRunResult
 }
 
 private sealed interface DeliveryOutcome {
@@ -129,6 +182,10 @@ private sealed interface DeliveryOutcome {
 
     data class TemporaryFailure(
         val errorCode: String
+    ) : DeliveryOutcome
+
+    data class MasterConflict(
+        val details: MasterConflictDetails
     ) : DeliveryOutcome
 
     data class PermanentFailure(

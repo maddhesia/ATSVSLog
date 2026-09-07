@@ -61,6 +61,74 @@ class SyncEngineTest {
         }
 
     @Test
+    fun masterConflict_marksFailed_andInvokesConflictHandler() = kotlinx.coroutines.runBlocking {
+        val item = event(
+            1,
+            "master-event-1",
+            """{"eventUuid":"master-event-1","eventType":"MASTER","transactionUuid":"tx-1","model":"Diamo","type":"Trolley Bag","brand":"American Tourister"}"""
+        )
+        val store = FakeQueueStore(item)
+        var captured: MasterConflictDetails? = null
+
+        val result = SyncEngine(
+            queue = store,
+            send = {
+                Response.success(
+                    ApiResponse(
+                        success = false,
+                        statusCode = "MASTER_CONFLICT",
+                        message = "Model already belongs to another Type/Brand",
+                        serverTime = "2026-08-31T00:00:00Z",
+                        apiVersion = 1,
+                        payload = JsonObject().apply {
+                            addProperty("model", "Diamo")
+                            addProperty("requestedType", "Trolley Bag")
+                            addProperty("requestedBrand", "American Tourister")
+                            addProperty("canonicalType", "Trolley Bag")
+                            addProperty("canonicalBrand", "Kamiliant")
+                        }
+                    )
+                )
+            },
+            now = { 3500L },
+            onMasterConflict = { _, details -> captured = details }
+        ).run()
+
+        assertEquals(SyncRunResult.StoppedAfterPermanentFailure, result)
+        assertEquals(listOf("master-event-1"), store.failedEventUuids)
+        assertEquals("MASTER_CONFLICT", store.pending.first().lastErrorCode)
+        assertEquals("Kamiliant", captured?.canonicalBrand)
+        assertEquals("tx-1", captured?.transactionUuid)
+    }
+
+    @Test
+    fun pendingEvent_isBlockedWhileItsTransactionHasUnresolvedConflict() = kotlinx.coroutines.runBlocking {
+        val item = event(
+            1,
+            "sale-event-1",
+            """{"eventUuid":"sale-event-1","eventType":"SALE","transactionUuid":"tx-1"}"""
+        )
+        val store = FakeQueueStore(item)
+        var sendCalled = false
+
+        val result = SyncEngine(
+            queue = store,
+            send = {
+                sendCalled = true
+                Response.success(successResponse())
+            },
+            isBlockedByMasterConflict = { event ->
+                event.payload.contains("tx-1")
+            }
+        ).run()
+
+        assertEquals(SyncRunResult.BlockedByMasterConflict, result)
+        assertEquals(false, sendCalled)
+        assertTrue(store.syncedEventUuids.isEmpty())
+        assertTrue(store.failedEventUuids.isEmpty())
+    }
+
+    @Test
     fun idempotentDuplicate_isTreatedAsSynced() = kotlinx.coroutines.runBlocking {
         val item = event(1, "event-1", """{"eventUuid":"event-1","eventType":"SALE"}""")
         val store = FakeQueueStore(item)

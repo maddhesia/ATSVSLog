@@ -1,17 +1,28 @@
 package com.sma.atsvslog
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sma.atsvslog.di.DatabaseProvider
 import com.sma.atsvslog.features.home.HomeScreen
@@ -20,10 +31,13 @@ import com.sma.atsvslog.features.report.ReportScreen
 import com.sma.atsvslog.features.report.ReportViewModel
 import com.sma.atsvslog.features.sale.SaleRecorderScreen
 import com.sma.atsvslog.features.sale.SaleRecorderViewModel
+import com.sma.atsvslog.notifications.MasterConflictNotificationManager
+import com.sma.atsvslog.repository.CloudMasterRepository
 import com.sma.atsvslog.repository.LocalSalesRepository
 import com.sma.atsvslog.sync.SyncScheduler
 import com.sma.atsvslog.ui.ui.ATSVSLogTheme
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -37,6 +51,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val cloudMasterRepository by lazy {
+        CloudMasterRepository(BetaNetwork.client.api)
+    }
+
+    private var dismissedConflictId by mutableStateOf<Long?>(null)
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     private var selectedDate by mutableStateOf(
         LocalDate.now().toString()
     )
@@ -44,20 +67,98 @@ class MainActivity : ComponentActivity() {
     private var showSaleRecorder by mutableStateOf(false)
     private var showReport by mutableStateOf(false)
     private var saleSessionId by mutableIntStateOf(0)
+    private var editingConflictId by mutableStateOf<Long?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
+        requestNotificationPermissionIfNeeded()
+        handleConflictIntent(intent)
 
         setContent {
             ATSVSLogTheme {
+                val pendingConflict by salesRepository
+                    .observeOldestPendingMasterConflict()
+                    .collectAsState(initial = null)
+
                 Surface(modifier = androidx.compose.ui.Modifier.fillMaxSize()) {
+                    if (pendingConflict?.notifiedAt != null &&
+                        pendingConflict?.localId != dismissedConflictId &&
+                        editingConflictId == null
+                    ) {
+                        val conflict = pendingConflict!!
+                        AlertDialog(
+                            onDismissRequest = {
+                                dismissedConflictId = conflict.localId
+                            },
+                            title = { Text("Model conflict") },
+                            text = {
+                                Text(
+                                    "Model ${conflict.model} is currently assigned to " +
+                                        "${conflict.canonicalType} / ${conflict.canonicalBrand}, " +
+                                        "but this sale uses ${conflict.requestedType} / " +
+                                        "${conflict.requestedBrand}. Choose EDIT SALE if the " +
+                                        "sale entry is wrong, or REASSIGN MODEL if the " +
+                                        "catalogue ownership is wrong. Historical sales are not changed by reassigning."
+                                )
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        dismissedConflictId = conflict.localId
+                                        editingConflictId = conflict.localId
+                                        saleSessionId += 1
+                                        showReport = false
+                                        showSaleRecorder = true
+                                        MasterConflictNotificationManager.cancel(this@MainActivity)
+                                    }
+                                ) {
+                                    Text("EDIT SALE")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(
+                                    onClick = {
+                                        lifecycleScope.launch {
+                                            runCatching {
+                                                salesRepository.resolveMasterConflict(
+                                                    conflict.localId
+                                                )
+                                            }.onSuccess {
+                                                dismissedConflictId = null
+                                                MasterConflictNotificationManager.cancel(
+                                                    this@MainActivity
+                                                )
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Text("REASSIGN MODEL")
+                                }
+                            }
+                        )
+                    }
+
                     BackHandler(
                         enabled = showSaleRecorder || showReport
                     ) {
-                        showSaleRecorder = false
-                        showReport = false
+                        if (editingConflictId != null) {
+                            val conflictId = editingConflictId
+                            lifecycleScope.launch {
+                                if (conflictId != null) {
+                                    runCatching {
+                                        salesRepository.cancelConflictSaleEditing(conflictId)
+                                    }
+                                }
+                                editingConflictId = null
+                                dismissedConflictId = null
+                                showSaleRecorder = false
+                            }
+                        } else {
+                            showSaleRecorder = false
+                            showReport = false
+                        }
                     }
 
                     when {
@@ -67,7 +168,9 @@ class MainActivity : ComponentActivity() {
                                     key = "sale-$selectedDate-$saleSessionId",
                                     factory = SaleRecorderViewModel.Factory(
                                         repository = salesRepository,
-                                        date = selectedDate
+                                        cloudMasterRepository = cloudMasterRepository,
+                                        date = selectedDate,
+                                        conflictLocalId = editingConflictId
                                     )
                                 )
 
@@ -101,10 +204,16 @@ class MainActivity : ComponentActivity() {
                                 onFinishCustomer = {
                                     saleViewModel.finishCustomer {
                                         showSaleRecorder = false
+                                        editingConflictId = null
+                                        dismissedConflictId = null
                                     }
                                 },
                                 onClearError =
-                                    saleViewModel::clearError
+                                    saleViewModel::clearError,
+                                onModelConflictDiscard =
+                                    saleViewModel::onModelConflictDiscard,
+                                onModelConflictCancel =
+                                    saleViewModel::onModelConflictCancel
                             )
                         }
 
@@ -172,4 +281,32 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleConflictIntent(intent)
+    }
+
+    private fun handleConflictIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(
+                MasterConflictNotificationManager.EXTRA_OPEN_MASTER_CONFLICT,
+                false
+            ) == true
+        ) {
+            dismissedConflictId = null
+            MasterConflictNotificationManager.cancel(this)
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+        }
+    }
+
 }

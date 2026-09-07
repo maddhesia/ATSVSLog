@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -22,11 +23,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -47,7 +51,9 @@ fun SaleRecorderScreen(
     onSellingPriceChanged: (String) -> Unit,
     onSaveItem: () -> Unit,
     onFinishCustomer: () -> Unit,
-    onClearError: () -> Unit
+    onClearError: () -> Unit,
+    onModelConflictDiscard: () -> Unit,
+    onModelConflictCancel: () -> Unit
 ) {
     var typeExpanded by remember { mutableStateOf(false) }
     var brandExpanded by remember { mutableStateOf(false) }
@@ -59,6 +65,14 @@ fun SaleRecorderScreen(
     val modelIsCustom = state.model == ENTER_NEW
     val sizeIsCustom = state.size == ENTER_NEW
     val colourIsCustom = state.colour == ENTER_NEW
+    val modelFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(state.focusModelRequest) {
+        if (state.focusModelRequest > 0) {
+            modelExpanded = true
+            modelFocusRequester.requestFocus()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -68,7 +82,7 @@ fun SaleRecorderScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Record Sale",
+            text = if (state.editingConflictLocalId != null) "Correct Sale" else "Record Sale",
             style = MaterialTheme.typography.headlineSmall
         )
 
@@ -136,6 +150,7 @@ fun SaleRecorderScreen(
         DropdownField(
             label = "Model",
             value = if (modelIsCustom) state.customModel else state.model,
+            modifier = Modifier.focusRequester(modelFocusRequester),
             expanded = modelExpanded,
             onExpandedChange = {
                 modelExpanded = !modelExpanded
@@ -243,7 +258,7 @@ fun SaleRecorderScreen(
                 enabled = !state.isSaving,
                 modifier = Modifier.weight(1f)
             ) {
-                Text("SAVE ITEM")
+                Text(if (state.editingConflictLocalId != null) "SAVE CORRECTION" else "SAVE ITEM")
             }
 
             Button(
@@ -256,6 +271,33 @@ fun SaleRecorderScreen(
         }
 
         Spacer(modifier = Modifier.height(12.dp))
+
+        state.modelConflict?.let { conflict ->
+            AlertDialog(
+                onDismissRequest = onModelConflictCancel,
+                title = { Text("Model conflict") },
+                text = {
+                    Text(
+                        "Model ${conflict.model} is currently assigned to " +
+                            "${conflict.canonicalType} / ${conflict.canonicalBrand}, " +
+                            "but this sale uses ${conflict.requestedType} / " +
+                            "${conflict.requestedBrand}. Reassigning the Model will " +
+                            "change its current Type/Brand association. Historical " +
+                            "sales are not changed. Do you want to reassign it?"
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = onModelConflictDiscard) {
+                        Text("REASSIGN MODEL")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onModelConflictCancel) {
+                        Text("CANCEL")
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -264,6 +306,7 @@ fun SaleRecorderScreen(
 private fun DropdownField(
     label: String,
     value: String,
+    modifier: Modifier = Modifier,
     expanded: Boolean,
     onExpandedChange: () -> Unit,
     options: List<String>,
@@ -286,7 +329,7 @@ private fun DropdownField(
                     expanded = expanded
                 )
             },
-            modifier = Modifier
+            modifier = modifier
                 .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                 .fillMaxWidth()
         )

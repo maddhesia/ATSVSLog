@@ -3,6 +3,8 @@ package com.sma.atsvslog.features.sale
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.sma.atsvslog.repository.CloudMasterRepository
+import com.sma.atsvslog.repository.CloudModelOwnershipResult
 import com.sma.atsvslog.repository.LocalSalesRepository
 import com.sma.atsvslog.repository.SaleItemDraft
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,12 +40,25 @@ data class SaleRecorderUiState(
     val sellingPrice: String = "",
     val isSaving: Boolean = false,
     val isFinished: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val modelConflict: ModelConflictPrompt? = null,
+    val focusModelRequest: Int = 0,
+    val editingConflictLocalId: Long? = null
+)
+
+data class ModelConflictPrompt(
+    val model: String,
+    val requestedType: String,
+    val requestedBrand: String,
+    val canonicalType: String,
+    val canonicalBrand: String
 )
 
 class SaleRecorderViewModel(
     private val repository: LocalSalesRepository,
-    private val date: String
+    private val cloudMasterRepository: CloudMasterRepository,
+    private val date: String,
+    private val conflictLocalId: Long? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -57,9 +72,35 @@ class SaleRecorderViewModel(
 
     init {
         viewModelScope.launch {
-            val transactionUuid = repository.startTransaction(date)
-            _uiState.update {
-                it.copy(transactionUuid = transactionUuid)
+            runCatching {
+                if (conflictLocalId == null) {
+                    val transactionUuid = repository.startTransaction(date)
+                    _uiState.update {
+                        it.copy(transactionUuid = transactionUuid)
+                    }
+                } else {
+                    val edit = repository.prepareConflictSaleForEditing(conflictLocalId)
+                    typeFlow.value = edit.conflict.canonicalType
+                    brandFlow.value = edit.conflict.canonicalBrand
+                    _uiState.update {
+                        it.copy(
+                            transactionUuid = edit.conflict.transactionUuid,
+                            itemsSaved = edit.itemCount,
+                            type = edit.conflict.canonicalType,
+                            brand = edit.conflict.canonicalBrand,
+                            model = edit.item.model,
+                            size = edit.item.size,
+                            colour = edit.item.colour,
+                            sellingPrice = edit.item.sellingPrice.toString(),
+                            editingConflictLocalId = edit.conflict.localId,
+                            focusModelRequest = it.focusModelRequest + 1
+                        )
+                    }
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(errorMessage = error.message ?: "Unable to open the conflicting sale.")
+                }
             }
         }
 
@@ -334,42 +375,195 @@ class SaleRecorderViewModel(
                 )
             }
 
+            val draft = SaleItemDraft(
+                type = effectiveType,
+                brand = state.brand,
+                model = effectiveModel,
+                size = effectiveSize,
+                colour = effectiveColour,
+                sellingPrice = state.sellingPrice.toLong()
+            )
+
+            if (state.editingConflictLocalId != null) {
+                runCatching {
+                    repository.updateConflictSaleItem(
+                        conflictLocalId = state.editingConflictLocalId,
+                        draft = draft
+                    )
+                }.onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            isSaving = false,
+                            errorMessage = null,
+                            type = effectiveType,
+                            model = effectiveModel,
+                            size = effectiveSize,
+                            colour = effectiveColour,
+                            customType = "",
+                            customModel = "",
+                            customSize = "",
+                            customColour = "",
+                            sellingPrice = draft.sellingPrice.toString()
+                        )
+                    }
+                }.onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isSaving = false,
+                            errorMessage = error.message ?: "Unable to save the corrected sale item."
+                        )
+                    }
+                }
+                return@launch
+            }
+
+            if (state.model == ENTER_NEW) {
+                when (
+                    val ownership = cloudMasterRepository.checkModelOwnership(
+                        model = effectiveModel,
+                        requestedType = effectiveType,
+                        requestedBrand = state.brand
+                    )
+                ) {
+                    is CloudModelOwnershipResult.Conflict -> {
+                        _uiState.update {
+                            it.copy(
+                                isSaving = false,
+                                modelConflict = ModelConflictPrompt(
+                                    model = ownership.model,
+                                    requestedType = effectiveType,
+                                    requestedBrand = state.brand,
+                                    canonicalType = ownership.canonicalType,
+                                    canonicalBrand = ownership.canonicalBrand
+                                )
+                            )
+                        }
+                        return@launch
+                    }
+
+                    CloudModelOwnershipResult.NoConflict -> {
+                        saveDraft(
+                            draft,
+                            allowModelConflict = false,
+                            trustCloudOwnership = true
+                        )
+                    }
+
+                    CloudModelOwnershipResult.Unavailable -> {
+                        saveDraft(draft, allowModelConflict = true)
+                    }
+                }
+            } else {
+                saveDraft(draft, allowModelConflict = false)
+            }
+        }
+    }
+
+    fun onModelConflictDiscard() {
+        val state = _uiState.value
+        val conflict = state.modelConflict ?: return
+        val transactionUuid = state.transactionUuid ?: return
+
+        val effectiveSize =
+            if (state.size == ENTER_NEW) state.customSize else state.size
+        val effectiveColour =
+            if (state.colour == ENTER_NEW) state.customColour else state.colour
+
+        if (effectiveSize.isBlank() || effectiveColour.isBlank() ||
+            state.sellingPrice.toLongOrNull() == null
+        ) {
+            _uiState.update {
+                it.copy(
+                    modelConflict = null,
+                    errorMessage = "Complete the item details before resolving the Model conflict."
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(isSaving = true, modelConflict = null, errorMessage = null)
+            }
+
             runCatching {
-                repository.saveItem(
+                repository.reclassifyAndSaveItem(
                     transactionUuid = transactionUuid,
                     draft = SaleItemDraft(
-                        type = effectiveType,
-                        brand = state.brand,
-                        model = effectiveModel,
+                        type = conflict.requestedType,
+                        brand = conflict.requestedBrand,
+                        model = conflict.model,
                         size = effectiveSize,
                         colour = effectiveColour,
                         sellingPrice = state.sellingPrice.toLong()
-                    )
+                    ),
+                    canonicalType = conflict.canonicalType,
+                    canonicalBrand = conflict.canonicalBrand
                 )
             }.onSuccess {
-                _uiState.update {
-                    it.copy(
-                        itemsSaved = it.itemsSaved + 1,
-                        isSaving = false,
-                        model = "",
-                        size = "Not Specified",
-                        colour = "",
-                        customModel = "",
-                        customSize = "",
-                        customColour = "",
-                        sellingPrice = "",
-                        errorMessage = null
-                    )
-                }
+                clearAfterItemSaved()
             }.onFailure { error ->
                 _uiState.update {
                     it.copy(
                         isSaving = false,
-                        errorMessage =
-                            error.message ?: "Unable to save item."
+                        errorMessage = error.message ?: "Unable to resolve Model conflict."
                     )
                 }
             }
+        }
+    }
+
+    fun onModelConflictCancel() {
+        _uiState.update {
+            it.copy(
+                modelConflict = null,
+                focusModelRequest = it.focusModelRequest + 1,
+                isSaving = false
+            )
+        }
+    }
+
+    private suspend fun saveDraft(
+        draft: SaleItemDraft,
+        allowModelConflict: Boolean,
+        trustCloudOwnership: Boolean = false
+    ) {
+        val transactionUuid = _uiState.value.transactionUuid ?: return
+
+        runCatching {
+            repository.saveItem(
+                transactionUuid = transactionUuid,
+                draft = draft,
+                allowModelConflict = allowModelConflict,
+                trustCloudOwnership = trustCloudOwnership
+            )
+        }.onSuccess {
+            clearAfterItemSaved()
+        }.onFailure { error ->
+            _uiState.update {
+                it.copy(
+                    isSaving = false,
+                    errorMessage = error.message ?: "Unable to save item."
+                )
+            }
+        }
+    }
+
+    private fun clearAfterItemSaved() {
+        _uiState.update {
+            it.copy(
+                itemsSaved = it.itemsSaved + 1,
+                isSaving = false,
+                model = "",
+                size = "Not Specified",
+                colour = "",
+                customModel = "",
+                customSize = "",
+                customColour = "",
+                sellingPrice = "",
+                modelConflict = null,
+                errorMessage = null
+            )
         }
     }
 
@@ -395,8 +589,28 @@ class SaleRecorderViewModel(
                 )
             }
 
+            val editConflictId = state.editingConflictLocalId
+
             runCatching {
-                repository.finishCustomer(transactionUuid)
+                if (editConflictId != null) {
+                    val effectiveType = if (state.type == ENTER_NEW) state.customType else state.type
+                    val effectiveModel = if (state.model == ENTER_NEW) state.customModel else state.model
+                    val effectiveSize = if (state.size == ENTER_NEW) state.customSize else state.size
+                    val effectiveColour = if (state.colour == ENTER_NEW) state.customColour else state.colour
+                    repository.finishConflictSaleEdit(
+                        conflictLocalId = editConflictId,
+                        draft = SaleItemDraft(
+                            type = effectiveType,
+                            brand = state.brand,
+                            model = effectiveModel,
+                            size = effectiveSize,
+                            colour = effectiveColour,
+                            sellingPrice = state.sellingPrice.toLong()
+                        )
+                    )
+                } else {
+                    repository.finishCustomer(transactionUuid)
+                }
             }.onSuccess {
                 _uiState.update {
                     it.copy(
@@ -496,7 +710,9 @@ class SaleRecorderViewModel(
 
     class Factory(
         private val repository: LocalSalesRepository,
-        private val date: String
+        private val cloudMasterRepository: CloudMasterRepository,
+        private val date: String,
+        private val conflictLocalId: Long? = null
     ) : ViewModelProvider.Factory {
 
         @Suppress("UNCHECKED_CAST")
@@ -509,8 +725,10 @@ class SaleRecorderViewModel(
                 )
             ) {
                 return SaleRecorderViewModel(
-                    repository,
-                    date
+                    repository = repository,
+                    cloudMasterRepository = cloudMasterRepository,
+                    date = date,
+                    conflictLocalId = conflictLocalId
                 ) as T
             }
 

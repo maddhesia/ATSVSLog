@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import com.sma.atsvslog.database.entity.TransactionItemEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -21,6 +22,16 @@ interface TransactionItemDao {
         ORDER BY localId ASC
     """)
     fun observeForTransaction(transactionUuid: String): Flow<List<TransactionItemEntity>>
+
+    @Update
+    suspend fun update(item: TransactionItemEntity)
+
+    @Query("""
+        SELECT * FROM transaction_items
+        WHERE itemUuid = :itemUuid
+        LIMIT 1
+    """)
+    suspend fun findByUuid(itemUuid: String): TransactionItemEntity?
 
     @Query("""
         SELECT * FROM transaction_items
