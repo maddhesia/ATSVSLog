@@ -24,6 +24,12 @@ interface SyncQueueDao {
     @Query("SELECT COUNT(*) FROM sync_queue WHERE status = 'Pending'")
     fun observePendingCount(): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM sync_queue WHERE status = 'Pending'")
+    suspend fun countPending(): Int
+
+    @Query("SELECT COUNT(*) FROM sync_queue WHERE status = 'Failed'")
+    suspend fun countFailed(): Int
+
     @Query("""
         SELECT * FROM sync_queue
         WHERE eventUuid = :eventUuid

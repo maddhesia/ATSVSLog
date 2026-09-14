@@ -2,6 +2,8 @@ package com.sma.atsvslog.sync
 
 import com.google.gson.JsonParser
 import com.sma.atsvslog.database.entity.SyncQueueEntity
+import com.sma.atsvslog.diagnostics.DiagnosticsLogger
+import com.sma.atsvslog.diagnostics.NoOpDiagnosticsLogger
 import com.sma.atsvslog.network.ApiRequestFactory
 import com.sma.atsvslog.network.dto.ACTION_SYNC
 import com.sma.atsvslog.network.dto.ApiRequest
@@ -23,8 +25,10 @@ class SyncEngine(
     private val send: suspend (ApiRequest<JsonObject>) -> Response<ApiResponse<JsonObject>>,
     private val now: () -> Long = System::currentTimeMillis,
     private val onMasterConflict: suspend (event: SyncQueueEntity, details: MasterConflictDetails) -> Unit = { _, _ -> },
-    private val isBlockedByMasterConflict: suspend (event: SyncQueueEntity) -> Boolean = { false }
+    private val isBlockedByMasterConflict: suspend (event: SyncQueueEntity) -> Boolean = { false },
+    private val diagnosticsLogger: DiagnosticsLogger = NoOpDiagnosticsLogger
 ) {
+    private var lastRequestId: String? = null
     suspend fun run(): SyncRunResult {
         while (true) {
             val event = queue.oldestPending()
@@ -36,9 +40,15 @@ class SyncEngine(
 
             when (val outcome = deliver(event)) {
                 DeliveryOutcome.Success -> {
+                    val attemptedAt = now()
                     queue.markSynced(
                         queueLocalId = event.queueLocalId,
-                        attemptedAt = now()
+                        attemptedAt = attemptedAt
+                    )
+                    diagnosticsLogger.log(
+                        level = "INFO", event = "SYNC_SUCCESS",
+                        message = "${event.eventType} accepted",
+                        requestId = lastRequestId, eventUuid = event.eventUuid
                     )
                 }
 
@@ -47,6 +57,11 @@ class SyncEngine(
                         queueLocalId = event.queueLocalId,
                         attemptedAt = now(),
                         errorCode = outcome.errorCode
+                    )
+                    diagnosticsLogger.log(
+                        level = "WARN", event = "SYNC_TEMPORARY_FAILURE",
+                        message = outcome.errorCode,
+                        requestId = lastRequestId, eventUuid = event.eventUuid
                     )
                     return SyncRunResult.Retry
                 }
@@ -57,6 +72,11 @@ class SyncEngine(
                         attemptedAt = now(),
                         errorCode = "MASTER_CONFLICT"
                     )
+                    diagnosticsLogger.log(
+                        level = "ERROR", event = "MASTER_CONFLICT",
+                        message = "Master ownership conflict requires operator resolution",
+                        requestId = lastRequestId, eventUuid = event.eventUuid
+                    )
                     onMasterConflict(event, outcome.details)
                     return SyncRunResult.StoppedAfterPermanentFailure
                 }
@@ -66,6 +86,11 @@ class SyncEngine(
                         queueLocalId = event.queueLocalId,
                         attemptedAt = now(),
                         errorCode = outcome.errorCode
+                    )
+                    diagnosticsLogger.log(
+                        level = "ERROR", event = "SYNC_FAILED",
+                        message = outcome.errorCode,
+                        requestId = lastRequestId, eventUuid = event.eventUuid
                     )
                     return SyncRunResult.StoppedAfterPermanentFailure
                 }
@@ -79,12 +104,23 @@ class SyncEngine(
         val payload = try {
             JsonParser.parseString(event.payload).asJsonObject
         } catch (_: Exception) {
+            diagnosticsLogger.log(
+                level = "ERROR", event = "SYNC_FAILED",
+                message = "INVALID_PAYLOAD", eventUuid = event.eventUuid
+            )
             return DeliveryOutcome.PermanentFailure("INVALID_PAYLOAD")
         }
 
         val request = ApiRequestFactory.create(
             action = ACTION_SYNC,
             payload = payload
+        )
+        lastRequestId = request.requestId
+
+        diagnosticsLogger.log(
+            level = "INFO", event = "SYNC_ATTEMPT",
+            message = "Sending ${event.eventType}",
+            requestId = request.requestId, eventUuid = event.eventUuid
         )
 
         return try {
@@ -104,8 +140,14 @@ class SyncEngine(
                             MasterConflictDetails.from(body.payload, payload)
                         )
 
-                    body.statusCode in IDEMPOTENT_SUCCESS_CODES ->
+                    body.statusCode in IDEMPOTENT_SUCCESS_CODES -> {
+                        diagnosticsLogger.log(
+                            level = "INFO", event = "SYNC_IDEMPOTENT_SUCCESS",
+                            message = "${event.eventType} already processed by server",
+                            requestId = request.requestId, eventUuid = event.eventUuid
+                        )
                         DeliveryOutcome.Success
+                    }
 
                     body.statusCode in TEMPORARY_STATUS_CODES ->
                         DeliveryOutcome.TemporaryFailure(body.statusCode)

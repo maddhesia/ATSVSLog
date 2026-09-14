@@ -16,6 +16,10 @@ class LocalSyncRepository(
 
     fun observePendingCount(): Flow<Int> = dao.observePendingCount()
 
+    suspend fun countPending(): Int = dao.countPending()
+
+    suspend fun countFailed(): Int = dao.countFailed()
+
     suspend fun update(event: SyncQueueEntity) = dao.update(event)
 
     override suspend fun markSynced(

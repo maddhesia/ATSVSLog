@@ -25,6 +25,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sma.atsvslog.di.DatabaseProvider
+import com.sma.atsvslog.diagnostics.DiagnosticsRepository
+import com.sma.atsvslog.diagnostics.DiagnosticsScreen
+import com.sma.atsvslog.diagnostics.DiagnosticsViewModel
 import com.sma.atsvslog.features.home.HomeScreen
 import com.sma.atsvslog.features.home.HomeViewModel
 import com.sma.atsvslog.features.report.ReportScreen
@@ -51,6 +54,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val diagnosticsRepository by lazy {
+        DiagnosticsRepository(
+            context = applicationContext,
+            database = database
+        )
+    }
+
     private val cloudMasterRepository by lazy {
         CloudMasterRepository(BetaNetwork.client.api)
     }
@@ -66,6 +76,7 @@ class MainActivity : ComponentActivity() {
 
     private var showSaleRecorder by mutableStateOf(false)
     private var showReport by mutableStateOf(false)
+    private var showDiagnostics by mutableStateOf(false)
     private var saleSessionId by mutableIntStateOf(0)
     private var editingConflictId by mutableStateOf<Long?>(null)
 
@@ -141,7 +152,7 @@ class MainActivity : ComponentActivity() {
                     }
 
                     BackHandler(
-                        enabled = showSaleRecorder || showReport
+                        enabled = showSaleRecorder || showReport || showDiagnostics
                     ) {
                         if (editingConflictId != null) {
                             val conflictId = editingConflictId
@@ -162,6 +173,26 @@ class MainActivity : ComponentActivity() {
                     }
 
                     when {
+                        showDiagnostics -> {
+                            val diagnosticsViewModel: DiagnosticsViewModel =
+                                viewModel(
+                                    key = "diagnostics",
+                                    factory = DiagnosticsViewModel.Factory(
+                                        repository = diagnosticsRepository
+                                    )
+                                )
+
+                            val diagnosticsState by diagnosticsViewModel.snapshot
+                                .collectAsStateWithLifecycle()
+
+                            DiagnosticsScreen(
+                                snapshot = diagnosticsState,
+                                onRefresh = diagnosticsViewModel::refresh,
+                                onClearLogs = diagnosticsViewModel::clearRecentLogs,
+                                onBack = { showDiagnostics = false }
+                            )
+                        }
+
                         showSaleRecorder -> {
                             val saleViewModel: SaleRecorderViewModel =
                                 viewModel(
@@ -273,6 +304,11 @@ class MainActivity : ComponentActivity() {
                                 onViewReport = {
                                     showSaleRecorder = false
                                     showReport = true
+                                },
+                                onOpenDiagnostics = {
+                                    showSaleRecorder = false
+                                    showReport = false
+                                    showDiagnostics = true
                                 }
                             )
                         }

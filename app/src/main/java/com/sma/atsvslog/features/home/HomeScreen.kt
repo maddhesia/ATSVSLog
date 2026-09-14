@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Button
@@ -25,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.LocalDate
@@ -41,7 +43,8 @@ fun HomeScreen(
     onRemoveWalkIn: () -> Unit,
     onResetWalkIns: () -> Unit,
     onRecordSale: () -> Unit,
-    onViewReport: () -> Unit
+    onViewReport: () -> Unit,
+    onOpenDiagnostics: () -> Unit
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
 
@@ -54,7 +57,12 @@ fun HomeScreen(
     ) {
         Text(
             text = "AT SVS Log",
-            style = MaterialTheme.typography.headlineMedium
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.pointerInput(Unit) {
+                detectTapGestures(
+                    onLongPress = { onOpenDiagnostics() }
+                )
+            }
         )
 
         Spacer(modifier = Modifier.padding(top = 24.dp))

@@ -6,8 +6,10 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.sma.atsvslog.BetaNetwork
 import com.sma.atsvslog.di.DatabaseProvider
+import com.sma.atsvslog.diagnostics.RoomDiagnosticsLogger
 import com.sma.atsvslog.notifications.MasterConflictNotificationManager
 import com.sma.atsvslog.repository.LocalSalesRepository
+import com.sma.atsvslog.repository.LocalSettingsRepository
 import com.sma.atsvslog.repository.LocalSyncRepository
 import com.google.gson.JsonParser
 import kotlinx.coroutines.flow.first
@@ -28,8 +30,13 @@ class SyncWorker(
         val database = DatabaseProvider.get(applicationContext)
         val queue = LocalSyncRepository(database)
         val salesRepository = LocalSalesRepository(database)
+        val diagnosticsLogger = RoomDiagnosticsLogger(LocalSettingsRepository(database))
 
         Log.i(TAG, "Sync worker started")
+        diagnosticsLogger.log(
+            level = "INFO", event = "SYNC_WORKER_STARTED",
+            message = "Sync worker started"
+        )
 
         val pendingConflict =
             salesRepository.observeOldestPendingMasterConflict().first()
@@ -84,16 +91,25 @@ class SyncWorker(
                             salesRepository.markConflictNotificationShown(conflict.localId)
                         }
                     }
-                }
+                },
+                diagnosticsLogger = diagnosticsLogger
             ).run()
         ) {
             SyncRunResult.Drained -> {
                 Log.i(TAG, "Sync worker drained Pending queue")
+                diagnosticsLogger.log(
+                    level = "INFO", event = "SYNC_WORKER_FINISHED",
+                    message = "Pending queue drained"
+                )
                 Result.success()
             }
 
             SyncRunResult.Retry -> {
                 Log.w(TAG, "Sync worker paused after temporary failure")
+                diagnosticsLogger.log(
+                    level = "WARN", event = "SYNC_WORKER_STOPPED",
+                    message = "Paused after temporary failure"
+                )
                 Result.retry()
             }
 
