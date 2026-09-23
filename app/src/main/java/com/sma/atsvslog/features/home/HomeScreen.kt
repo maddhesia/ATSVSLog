@@ -44,6 +44,8 @@ fun HomeScreen(
     onResetWalkIns: () -> Unit,
     onRecordSale: () -> Unit,
     onViewReport: () -> Unit,
+    onShareReport: () -> Unit,
+    shareReportInProgress: Boolean,
     onOpenDiagnostics: () -> Unit
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
@@ -128,6 +130,22 @@ fun HomeScreen(
                 .padding(bottom = 8.dp)
         ) {
             Text("VIEW DAILY REPORT")
+        }
+
+        OutlinedButton(
+            onClick = onShareReport,
+            enabled = !shareReportInProgress,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+        ) {
+            Text(
+                if (shareReportInProgress) {
+                    "PREPARING REPORT…"
+                } else {
+                    "SHARE DAILY REPORT"
+                }
+            )
         }
 
         Button(

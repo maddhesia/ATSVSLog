@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 fun ReportScreen(
     state: ReportUiState,
     onReload: () -> Unit,
+    onShareReport: () -> Unit,
+    shareReportInProgress: Boolean,
     onBack: () -> Unit
 ) {
     Column(
@@ -40,11 +42,28 @@ fun ReportScreen(
                 Text("BACK")
             }
 
-            TextButton(
-                onClick = onReload,
-                enabled = !state.isLoading
-            ) {
-                Text("REFRESH")
+            Row {
+                TextButton(
+                    onClick = onReload,
+                    enabled = !state.isLoading && !shareReportInProgress
+                ) {
+                    Text("REFRESH")
+                }
+
+                TextButton(
+                    onClick = onShareReport,
+                    enabled = state.report != null &&
+                        !state.isLoading &&
+                        !shareReportInProgress
+                ) {
+                    Text(
+                        if (shareReportInProgress) {
+                            "SHARING…"
+                        } else {
+                            "SHARE"
+                        }
+                    )
+                }
             }
         }
 

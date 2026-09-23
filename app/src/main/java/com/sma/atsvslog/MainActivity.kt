@@ -3,6 +3,7 @@ package com.sma.atsvslog
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.widget.Toast
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
@@ -32,6 +33,7 @@ import com.sma.atsvslog.features.home.HomeScreen
 import com.sma.atsvslog.features.home.HomeViewModel
 import com.sma.atsvslog.features.report.ReportScreen
 import com.sma.atsvslog.features.report.ReportViewModel
+import com.sma.atsvslog.features.report.DailyReportShareManager
 import com.sma.atsvslog.features.sale.SaleRecorderScreen
 import com.sma.atsvslog.features.sale.SaleRecorderViewModel
 import com.sma.atsvslog.notifications.MasterConflictNotificationManager
@@ -77,6 +79,7 @@ class MainActivity : ComponentActivity() {
     private var showSaleRecorder by mutableStateOf(false)
     private var showReport by mutableStateOf(false)
     private var showDiagnostics by mutableStateOf(false)
+    private var shareReportInProgress by mutableStateOf(false)
     private var saleSessionId by mutableIntStateOf(0)
     private var editingConflictId by mutableStateOf<Long?>(null)
 
@@ -264,6 +267,10 @@ class MainActivity : ComponentActivity() {
                             ReportScreen(
                                 state = state,
                                 onReload = reportViewModel::reload,
+                                onShareReport = {
+                                    shareDailyReport(selectedDate)
+                                },
+                                shareReportInProgress = shareReportInProgress,
                                 onBack = {
                                     showReport = false
                                 }
@@ -305,6 +312,10 @@ class MainActivity : ComponentActivity() {
                                     showSaleRecorder = false
                                     showReport = true
                                 },
+                                onShareReport = {
+                                    shareDailyReport(selectedDate)
+                                },
+                                shareReportInProgress = shareReportInProgress,
                                 onOpenDiagnostics = {
                                     showSaleRecorder = false
                                     showReport = false
@@ -331,6 +342,32 @@ class MainActivity : ComponentActivity() {
         ) {
             dismissedConflictId = null
             MasterConflictNotificationManager.cancel(this)
+        }
+    }
+
+    private fun shareDailyReport(date: String) {
+        if (shareReportInProgress) {
+            return
+        }
+
+        shareReportInProgress = true
+
+        lifecycleScope.launch {
+            runCatching {
+                DailyReportShareManager.share(
+                    context = this@MainActivity,
+                    api = BetaNetwork.client.api,
+                    date = date
+                )
+            }.onFailure { error ->
+                Toast.makeText(
+                    this@MainActivity,
+                    error.message ?: "Unable to prepare the daily report.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+
+            shareReportInProgress = false
         }
     }
 
