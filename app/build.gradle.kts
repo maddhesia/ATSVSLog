@@ -4,6 +4,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val betaApiKey = providers.gradleProperty("ATSVS_BETA_API_KEY").orNull
+    ?: System.getenv("ATSVS_BETA_API_KEY")
+    ?: ""
+
 android {
     namespace = "com.sma.atsvslog"
     compileSdk {
@@ -19,13 +23,19 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        buildConfigField(
+            "String",
+            "BETA_API_KEY",
+            "\"${betaApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        )
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
             optimization {
-                enable = false
+                enable = true
             }
         }
     }
@@ -35,6 +45,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     testOptions {
         unitTests {

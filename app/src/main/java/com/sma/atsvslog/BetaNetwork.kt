@@ -9,14 +9,23 @@ object BetaNetwork {
         "https://script.google.com/macros/s/AKfycbzwHgVpEU4WXH2jT1PVnjVVQn2L_8JV8uHmMLnuGWHYvrP6CIvTUprWIYt1I4zr31z5/"
 
     /*
-     * IMPORTANT:
-     * Paste here the SAME Beta API key that you configured
-     * in Apps Script's configureBeta() function.
+     * The Beta API key is deliberately NOT stored in source control.
      *
-     * Do NOT send the key to me.
+     * Gradle obtains it from:
+     *   ATSVS_BETA_API_KEY
+     *
+     * via the BuildConfig field generated in app/build.gradle.kts.
+     *
+     * Do not hardcode the key here and do not send it to ChatGPT.
      */
-    private const val API_KEY =
-        "ATSVS-BETA1-Test-8VivekfK7xQ2mpMinty9vL4rtShikha6"
+    private val API_KEY: String =
+        BuildConfig.BETA_API_KEY.trim().also { key ->
+            require(key.isNotEmpty()) {
+                "ATSVS_BETA_API_KEY is not configured. " +
+                    "Add it to %USERPROFILE%\\.gradle\\gradle.properties " +
+                    "or the ATSVS_BETA_API_KEY environment variable before running the app."
+            }
+        }
 
     val client: AtSvsNetworkClient by lazy {
         AtSvsNetworkClient(

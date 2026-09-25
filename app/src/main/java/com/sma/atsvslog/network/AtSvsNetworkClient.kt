@@ -1,6 +1,7 @@
 package com.sma.atsvslog.network
 
 import android.util.Log
+import com.sma.atsvslog.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.ResponseBody.Companion.toResponseBody
 import retrofit2.Retrofit
@@ -21,22 +22,26 @@ class AtSvsNetworkClient(
             )
         )
         .addInterceptor { chain ->
-            val response = chain.proceed(chain.request())
+            val request = chain.request()
+            val response = chain.proceed(request)
 
             val responseBody = response.body
             val responseText = responseBody?.string()
 
-            Log.d(
-                "ATSVS_HTTP",
-                """
-    HTTP ${response.code}
-    FINAL URL: ${response.request.url}
-    PREVIOUS RESPONSE: ${response.priorResponse?.code}
-    PREVIOUS LOCATION: ${response.priorResponse?.headers?.get("Location")}
-    BODY:
-    $responseText
-    """.trimIndent()
-            )
+            /*
+             * M16 release-hardening rule:
+             * never write the API key, full query string, redirect Location,
+             * or response body to Logcat.
+             *
+             * Even DEBUG builds keep the log intentionally redacted. This
+             * preserves the frozen "Never log secrets" rule.
+             */
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    "ATSVS_HTTP",
+                    "HTTP ${response.code} ${request.method} ${request.url.encodedPath}"
+                )
+            }
 
             response.newBuilder()
                 .body(

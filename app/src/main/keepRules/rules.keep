@@ -1,12 +1,18 @@
-# Add project specific R8 rules here.
-# AGP will combine all keep rule files in src/main/keepRules to pass to R8
+# ATSVSLog M16 release-hardening keep rules.
 #
-# For more details, see
-#   https://d.android.com/r/tools/r8/keep-rules
+# Gson materializes these classes reflectively from JSON. Keep their class
+# and field names stable in the release build so report/diagnostics decoding
+# remains functional after R8 optimization/obfuscation.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Network envelope and sync payload DTOs.
+-keep class com.sma.atsvslog.network.dto.** { *; }
+
+# Daily Report Gson models.
+-keep class com.sma.atsvslog.features.report.DailyReport { *; }
+-keep class com.sma.atsvslog.features.report.MerchandiseSold { *; }
+-keep class com.sma.atsvslog.features.report.ReportItem { *; }
+-keep class com.sma.atsvslog.features.report.MonthToDate { *; }
+
+# Diagnostics Gson models.
+-keep class com.sma.atsvslog.diagnostics.DiagnosticLogEntry { *; }
+-keep class com.sma.atsvslog.diagnostics.DiagnosticLastError { *; }
