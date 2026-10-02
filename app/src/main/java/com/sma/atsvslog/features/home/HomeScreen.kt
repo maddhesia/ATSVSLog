@@ -1,17 +1,17 @@
 package com.sma.atsvslog.features.home
 
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,24 +54,25 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(horizontal = 28.dp, vertical = 16.dp)
             .navigationBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
             text = "AT SVS Log",
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.pointerInput(Unit) {
-                detectTapGestures(
-                    onLongPress = { onOpenDiagnostics() }
-                )
+                detectTapGestures( onLongPress = { onOpenDiagnostics() } )
+
             }
         )
 
-        Spacer(modifier = Modifier.padding(top = 24.dp))
-
         OutlinedButton(
             onClick = { showDatePicker = true },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
         ) {
             Text(
                 text = "Date: $date",
@@ -79,14 +80,19 @@ fun HomeScreen(
             )
         }
 
-        Spacer(modifier = Modifier.padding(top = 24.dp))
-
         Text(
             text = "Footfall: $walkIns",
             style = MaterialTheme.typography.headlineSmall
         )
 
-        Spacer(modifier = Modifier.padding(top = 20.dp))
+        OutlinedButton(
+            onClick = onResetWalkIns,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+        ) {
+            Text("Reset Walk-ins")
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -94,40 +100,42 @@ fun HomeScreen(
         ) {
             OutlinedButton(
                 onClick = onRemoveWalkIn,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
             ) {
                 Text("-1")
             }
 
-            Button(
+            OutlinedButton(
                 onClick = onAddWalkIn,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
             ) {
                 Text("+1")
             }
-
-            OutlinedButton(
-                onClick = onResetWalkIns,
-                modifier = Modifier.weight(2f)
-            ) {
-                Text("Reset Walk-ins")
-            }
         }
-
-        Spacer(modifier = Modifier.padding(top = 28.dp))
 
         Text(
             text = "Conversions: $conversions",
-            style = MaterialTheme.typography.titleLarge
+            style = MaterialTheme.typography.headlineSmall
         )
 
-        Spacer(modifier = Modifier.weight(1f))
+        OutlinedButton(
+            onClick = onRecordSale,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+        ) {
+            Text("RECORD SALE")
+        }
 
         OutlinedButton(
             onClick = onViewReport,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 8.dp)
+                .height(56.dp)
         ) {
             Text("VIEW DAILY REPORT")
         }
@@ -137,7 +145,7 @@ fun HomeScreen(
             enabled = !shareReportInProgress,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 8.dp)
+                .height(56.dp)
         ) {
             Text(
                 if (shareReportInProgress) {
@@ -146,16 +154,6 @@ fun HomeScreen(
                     "SHARE DAILY REPORT"
                 }
             )
-        }
-
-        Button(
-            onClick = onRecordSale,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            colors = ButtonDefaults.buttonColors()
-        ) {
-            Text("RECORD SALE")
         }
     }
 

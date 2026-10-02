@@ -2,150 +2,165 @@ package com.sma.atsvslog.features.report
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.Typeface
-import android.text.StaticLayout
-import android.text.TextPaint
+import android.graphics.drawable.Drawable
+import androidx.core.content.ContextCompat
+import com.sma.atsvslog.R
 import java.io.File
 import java.io.FileOutputStream
 import java.text.NumberFormat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.max
 
 /**
- * Creates the stakeholder-facing daily report image used by M15 sharing.
+ * Creates the stakeholder-facing Daily Report image used by sharing.
  *
- * The renderer deliberately consumes the existing DailyReport model. It does
- * not read Room, Sheets, or raw ledgers and therefore cannot become a second
- * reporting engine.
+ * M17 presentation pass:
+ * - Uses one of the four approved original abstract artworks at random.
+ * - Keeps the artwork subordinate to the report content with a dark scrim
+ *   and translucent report panels.
+ * - Reorganizes the report into spacious KPI, merchandise and MTD blocks.
+ * - Uses the selected report date for date-sensitive section wording.
+ *
+ * The renderer consumes only DailyReport and does not read Room, Sheets or
+ * raw ledgers.
  */
 object DailyReportCardRenderer {
 
     private const val WIDTH = 1080
-    private const val HEIGHT = 1350
+    private const val BASE_HEIGHT = 1600
     private const val MARGIN = 64f
-    private const val GAP = 28f
+    private const val GAP = 24f
+    private const val PANEL_RADIUS = 28f
 
     private val moneyFormat = NumberFormat.getNumberInstance(Locale("en", "IN")).apply {
         maximumFractionDigits = 0
         minimumFractionDigits = 0
     }
 
-    private val dateFormatter = DateTimeFormatter.ofPattern(
-        "dd MMM yyyy",
-        Locale.ENGLISH
+    private val artworkIds = intArrayOf(
+        R.drawable.report_artwork_1,
+        R.drawable.report_artwork_2,
+        R.drawable.report_artwork_3,
+        R.drawable.report_artwork_4
     )
 
     fun render(
         context: Context,
         report: DailyReport
     ): File {
+        val maxItems = max(
+            report.merchandiseSold.americanTourister.size,
+            report.merchandiseSold.kamiliant.size
+        )
+        val merchandiseHeight = max(230f, 128f + maxItems * 64f)
+        val height = BASE_HEIGHT + max(0, maxItems - 6) * 64
+
         val bitmap = Bitmap.createBitmap(
             WIDTH,
-            HEIGHT,
+            height,
             Bitmap.Config.ARGB_8888
         )
         val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.WHITE)
 
-        val accent = Color.rgb(98, 0, 238)
-        val accentDark = Color.rgb(55, 0, 179)
-        val text = Color.rgb(32, 32, 36)
-        val muted = Color.rgb(100, 100, 108)
-        val border = Color.rgb(224, 224, 230)
-        val panel = Color.rgb(248, 247, 252)
+        drawArtworkBackground(context, canvas, width = WIDTH, height = height)
+        drawOverlay(canvas, WIDTH, height)
 
-        val titlePaint = paint(
-            size = 42f,
-            color = Color.WHITE,
-            bold = true
-        )
-        val subtitlePaint = paint(
-            size = 25f,
-            color = Color.WHITE
-        )
-        val sectionPaint = paint(
-            size = 28f,
-            color = accentDark,
-            bold = true
-        )
-        val labelPaint = paint(
-            size = 23f,
-            color = muted
-        )
-        val valuePaint = paint(
-            size = 31f,
-            color = text,
-            bold = true
-        )
-        val bodyPaint = paint(
-            size = 22f,
-            color = text
-        )
-        val smallPaint = paint(
-            size = 19f,
-            color = muted
-        )
+        val white = Color.WHITE
+        val softWhite = Color.argb(225, 255, 255, 255)
+        val panelFill = Color.argb(202, 6, 12, 30)
+        val panelStroke = Color.argb(95, 255, 255, 255)
+        val accent = Color.rgb(76, 196, 255)
+        val muted = Color.argb(205, 225, 232, 245)
+        val value = Color.WHITE
+
+        val titlePaint = paint(46f, white, true)
+        val subtitlePaint = paint(25f, softWhite)
+        val sectionPaint = paint(27f, accent, true)
+        val labelPaint = paint(22f, muted)
+        val valuePaint = paint(34f, value, true)
+        val totalPaint = paint(42f, value, true)
+        val bodyPaint = paint(22f, softWhite)
+        val smallPaint = paint(18f, muted)
+        val footerPaint = paint(17f, Color.argb(185, 225, 232, 245))
+
+        var y = 64f
 
         // Header
-        canvas.drawRect(
-            0f,
-            0f,
-            WIDTH.toFloat(),
-            190f,
-            Paint().apply { color = accent }
-        )
+        canvas.drawText("DAILY SALES REPORT", MARGIN, y + 42f, titlePaint)
+        canvas.drawText(report.storeName, MARGIN, y + 82f, subtitlePaint)
         canvas.drawText(
-            "DAILY SALES REPORT",
+            "${report.location}  •  ${formatHeaderDate(report.reportDate)}",
             MARGIN,
-            70f,
-            titlePaint
-        )
-        canvas.drawText(
-            report.storeName,
-            MARGIN,
-            112f,
+            y + 118f,
             subtitlePaint
         )
+        y += 164f
+
+        // Daily sales
+        y = drawPanel(canvas, y, 190f, panelFill, panelStroke)
         canvas.drawText(
-            "${report.location}  •  ${formatDate(report.reportDate)}",
-            MARGIN,
-            151f,
-            subtitlePaint
+            dailySalesTitle(report.reportDate),
+            MARGIN + 28f,
+            y + 43f,
+            sectionPaint
+        )
+        drawMetric(
+            canvas, "American Tourister", money(report.atSales),
+            96f, y + 82f, labelPaint, valuePaint
+        )
+        drawMetric(
+            canvas, "Kamiliant", money(report.kamSales),
+            430f, y + 82f, labelPaint, valuePaint
+        )
+        drawMetric(
+            canvas, "TOTAL", money(report.totalSales),
+            760f, y + 82f, labelPaint, totalPaint
+        )
+        y += 190f + GAP
+
+        // Footfall / conversion
+        y = drawPanel(canvas, y, 190f, panelFill, panelStroke)
+        canvas.drawText(
+            "FOOTFALL & CONVERSION",
+            MARGIN + 28f,
+            y + 43f,
+            sectionPaint
+        )
+        drawMetric(
+            canvas, "Walk-ins", report.footfall.toString(),
+            96f, y + 84f, labelPaint, valuePaint
+        )
+        drawMetric(
+            canvas, "Conversions", report.conversions.toString(),
+            430f, y + 84f, labelPaint, valuePaint
+        )
+        drawMetric(
+            canvas, "Conversion %", percent(report.conversionPercent),
+            760f, y + 84f, labelPaint, valuePaint
+        )
+        y += 190f + GAP
+
+        // Merchandise
+        y = drawPanel(canvas, y, merchandiseHeight, panelFill, panelStroke)
+        canvas.drawText(
+            "MERCHANDISE SOLD",
+            MARGIN + 28f,
+            y + 43f,
+            sectionPaint
         )
 
-        var y = 225f
-
-        y = drawPanel(
-            canvas,
-            y,
-            165f,
-            panel,
-            border
-        )
-        canvas.drawText("TODAY'S SALES", MARGIN + 24f, y + 42f, sectionPaint)
-        drawMetric(canvas, "American Tourister", money(report.atSales), 340f, y + 90f, labelPaint, valuePaint)
-        drawMetric(canvas, "Kamiliant", money(report.kamSales), 700f, y + 90f, labelPaint, valuePaint)
-        drawMetric(canvas, "TOTAL", money(report.totalSales), 340f, y + 138f, labelPaint, valuePaint)
-        y += 165f + GAP
-
-        y = drawPanel(canvas, y, 155f, panel, border)
-        canvas.drawText("FOOTFALL & CONVERSION", MARGIN + 24f, y + 40f, sectionPaint)
-        drawMetric(canvas, "Walk-ins", report.footfall.toString(), 340f, y + 88f, labelPaint, valuePaint)
-        drawMetric(canvas, "Conversions", report.conversions.toString(), 700f, y + 88f, labelPaint, valuePaint)
-        drawMetric(canvas, "Conversion %", percent(report.conversionPercent), 340f, y + 132f, labelPaint, valuePaint)
-        y += 155f + GAP
-
-        y = drawPanel(canvas, y, 360f, panel, border)
-        canvas.drawText("MERCHANDISE SOLD", MARGIN + 24f, y + 40f, sectionPaint)
-
-        val leftX = MARGIN + 24f
-        val rightX = 560f
-        val columnWidth = 430
-        val itemStartY = y + 78f
+        val leftX = MARGIN + 28f
+        val rightX = WIDTH / 2f + 18f
+        val columnWidth = 450f
+        val itemStartY = y + 80f
 
         canvas.drawText(
             "AMERICAN TOURISTER (${report.merchandiseSold.americanTourister.size})",
@@ -164,7 +179,7 @@ object DailyReportCardRenderer {
             canvas,
             report.merchandiseSold.americanTourister,
             leftX,
-            itemStartY + 25f,
+            itemStartY + 28f,
             columnWidth,
             bodyPaint,
             smallPaint
@@ -173,47 +188,67 @@ object DailyReportCardRenderer {
             canvas,
             report.merchandiseSold.kamiliant,
             rightX,
-            itemStartY + 25f,
+            itemStartY + 28f,
             columnWidth,
             bodyPaint,
             smallPaint
         )
 
-        y += 360f + GAP
+        y += merchandiseHeight + GAP
 
-        y = drawPanel(canvas, y, 245f, panel, border)
-        canvas.drawText("MONTH TO DATE", MARGIN + 24f, y + 40f, sectionPaint)
-        drawMetric(canvas, "AT", money(report.monthToDate.atSales), 340f, y + 88f, labelPaint, valuePaint)
-        drawMetric(canvas, "Kamiliant", money(report.monthToDate.kamSales), 700f, y + 88f, labelPaint, valuePaint)
-        drawMetric(canvas, "Total", money(report.monthToDate.totalSales), 340f, y + 136f, labelPaint, valuePaint)
-        drawMetric(canvas, "Footfall", report.monthToDate.footfall.toString(), 700f, y + 136f, labelPaint, valuePaint)
-        drawMetric(canvas, "Conversions", report.monthToDate.conversions.toString(), 340f, y + 184f, labelPaint, valuePaint)
-        drawMetric(canvas, "Conversion %", percent(report.monthToDate.conversionPercent), 700f, y + 184f, labelPaint, valuePaint)
-        y += 245f
+        // Month to date
+        val mtdHeight = 318f
+        y = drawPanel(canvas, y, mtdHeight, panelFill, panelStroke)
+        canvas.drawText(
+            "MONTH TO DATE",
+            MARGIN + 28f,
+            y + 43f,
+            sectionPaint
+        )
 
-        // Footer
+        drawMetric(canvas, "American Tourister", money(report.monthToDate.atSales),
+            96f, y + 84f, labelPaint, valuePaint)
+        drawMetric(canvas, "Kamiliant", money(report.monthToDate.kamSales),
+            560f, y + 84f, labelPaint, valuePaint)
+
+        drawMetric(canvas, "Total", money(report.monthToDate.totalSales),
+            96f, y + 142f, labelPaint, valuePaint)
+        drawMetric(canvas, "Footfall", report.monthToDate.footfall.toString(),
+            560f, y + 142f, labelPaint, valuePaint)
+
+        drawMetric(canvas, "Conversions", report.monthToDate.conversions.toString(),
+            96f, y + 200f, labelPaint, valuePaint)
+        drawMetric(canvas, "Conversion %", percent(report.monthToDate.conversionPercent),
+            560f, y + 200f, labelPaint, valuePaint)
+
+        // AOV immediately below Conversion % in the MTD block.
+        drawMetric(canvas, "AOV", money(report.monthToDate.aov),
+            560f, y + 258f, labelPaint, valuePaint)
+
+        y += mtdHeight + GAP
+
         canvas.drawLine(
             MARGIN,
-            HEIGHT - 55f,
+            y,
             WIDTH - MARGIN,
-            HEIGHT - 55f,
-            Paint().apply {
-                color = border
+            y,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.argb(100, 255, 255, 255)
                 strokeWidth = 2f
             }
         )
         canvas.drawText(
-            "ATSVSLog  •  Generated from the current Daily Report",
+            "Sales Buddy  •  Store Sales Report",
             MARGIN,
-            HEIGHT - 24f,
-            smallPaint
+            y + 34f,
+            footerPaint
         )
 
         val directory = File(context.cacheDir, "report_cards").apply {
             mkdirs()
         }
         val safeDate = report.reportDate.replace(Regex("[^0-9-]"), "_")
-        val output = File(directory, "ATSVSLog_Daily_Report_$safeDate.png")
+        val output = File(directory, "Sales_Buddy_Store_Sales_Report_$safeDate.png")
 
         FileOutputStream(output).use { stream ->
             check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)) {
@@ -225,12 +260,58 @@ object DailyReportCardRenderer {
         return output
     }
 
+    private fun drawArtworkBackground(
+        context: Context,
+        canvas: Canvas,
+        width: Int,
+        height: Int
+    ) {
+        val resId = artworkIds.random()
+        val bitmap = BitmapFactory.decodeResource(context.resources, resId)
+            ?: throw IllegalStateException("Unable to load report artwork.")
+
+        val sourceRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+        val targetRatio = width.toFloat() / height.toFloat()
+
+        val sourceRect = if (sourceRatio > targetRatio) {
+            val sourceWidth = (bitmap.height * targetRatio).toInt()
+            val left = (bitmap.width - sourceWidth) / 2
+            Rect(left, 0, left + sourceWidth, bitmap.height)
+        } else {
+            val sourceHeight = (bitmap.width / targetRatio).toInt()
+            val top = (bitmap.height - sourceHeight) / 2
+            Rect(0, top, bitmap.width, top + sourceHeight)
+        }
+
+        canvas.drawBitmap(
+            bitmap,
+            sourceRect,
+            Rect(0, 0, width, height),
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        )
+        bitmap.recycle()
+    }
+
+    private fun drawOverlay(canvas: Canvas, width: Int, height: Int) {
+        // Keep the artwork visibly present while ensuring white foreground text
+        // remains readable over bright cyan/pink/orange areas.
+        canvas.drawRect(
+            0f,
+            0f,
+            width.toFloat(),
+            height.toFloat(),
+            Paint().apply {
+                color = Color.argb(145, 0, 0, 8)
+            }
+        )
+    }
+
     private fun drawPanel(
         canvas: Canvas,
         top: Float,
         height: Float,
         fill: Int,
-        border: Int
+        stroke: Int
     ): Float {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = fill
@@ -241,11 +322,11 @@ object DailyReportCardRenderer {
             top,
             WIDTH - MARGIN,
             top + height,
-            24f,
-            24f,
+            PANEL_RADIUS,
+            PANEL_RADIUS,
             paint
         )
-        paint.color = border
+        paint.color = stroke
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2f
         canvas.drawRoundRect(
@@ -253,8 +334,8 @@ object DailyReportCardRenderer {
             top,
             WIDTH - MARGIN,
             top + height,
-            24f,
-            24f,
+            PANEL_RADIUS,
+            PANEL_RADIUS,
             paint
         )
         return top
@@ -270,7 +351,7 @@ object DailyReportCardRenderer {
         valuePaint: Paint
     ) {
         canvas.drawText(label, x, y, labelPaint)
-        canvas.drawText(value, x, y + 30f, valuePaint)
+        canvas.drawText(value, x, y + 34f, valuePaint)
     }
 
     private fun drawItems(
@@ -278,17 +359,17 @@ object DailyReportCardRenderer {
         items: List<ReportItem>,
         x: Float,
         startY: Float,
-        width: Int,
+        width: Float,
         bodyPaint: Paint,
         smallPaint: Paint
     ) {
         if (items.isEmpty()) {
-            canvas.drawText("No merchandise recorded.", x, startY + 10f, smallPaint)
+            canvas.drawText("No merchandise recorded.", x, startY + 12f, smallPaint)
             return
         }
 
         var y = startY
-        items.take(8).forEachIndexed { index, item ->
+        items.forEachIndexed { index, item ->
             val title = listOf(item.model, item.size)
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
@@ -297,59 +378,20 @@ object DailyReportCardRenderer {
                 .filter { it.isNotEmpty() }
                 .joinToString("  •  ")
 
-            y = drawWrappedText(
-                canvas,
+            canvas.drawText(
                 "${index + 1}. $title",
                 x,
                 y,
-                width,
                 bodyPaint
             )
-            y = drawWrappedText(
-                canvas,
+            canvas.drawText(
                 detail,
                 x + 28f,
-                y + 3f,
-                width - 28,
-                smallPaint
-            ) + 15f
-        }
-
-        if (items.size > 8) {
-            canvas.drawText(
-                "+ ${items.size - 8} more item(s)",
-                x,
-                y,
+                y + 25f,
                 smallPaint
             )
+            y += 64f
         }
-    }
-
-    private fun drawWrappedText(
-        canvas: Canvas,
-        text: String,
-        x: Float,
-        y: Float,
-        width: Int,
-        paint: Paint
-    ): Float {
-        val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = paint.color
-            textSize = paint.textSize
-            typeface = paint.typeface
-        }
-        val layout = StaticLayout.Builder
-            .obtain(text, 0, text.length, textPaint, width)
-            .setIncludePad(false)
-            .setLineSpacing(0f, 1.0f)
-            .build()
-
-        canvas.save()
-        canvas.translate(x, y)
-        layout.draw(canvas)
-        canvas.restore()
-
-        return y + layout.height
     }
 
     private fun paint(
@@ -364,13 +406,29 @@ object DailyReportCardRenderer {
         }
 
     private fun money(value: Long): String =
-        "₹${moneyFormat.format(value)}"
+        moneyFormat.format(value)
 
     private fun percent(value: Double): String =
         String.format(Locale.US, "%.1f%%", value)
 
-    private fun formatDate(value: String): String =
+    private fun formatHeaderDate(value: String): String =
         runCatching {
-            LocalDate.parse(value).format(dateFormatter)
+            LocalDate.parse(value).format(
+                DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.ENGLISH)
+            )
         }.getOrElse { value }
+
+    private fun dailySalesTitle(value: String): String =
+        runCatching {
+            val date = LocalDate.parse(value)
+            if (date == LocalDate.now()) {
+                "TODAY'S SALES"
+            } else {
+                "SALES FOR " + date.format(
+                    DateTimeFormatter.ofPattern("dd MMMM yyyy", Locale.ENGLISH)
+                ).uppercase(Locale.ENGLISH)
+            }
+        }.getOrElse {
+            "SALES FOR $value"
+        }
 }

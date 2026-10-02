@@ -3,10 +3,10 @@ package com.sma.atsvslog.features.report
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -18,6 +18,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import java.util.Locale
 
 @Composable
 fun ReportScreen(
@@ -73,9 +74,7 @@ fun ReportScreen(
         )
 
         when {
-            state.isLoading -> {
-                Text("Loading report…")
-            }
+            state.isLoading -> Text("Loading report…")
 
             state.errorMessage != null -> {
                 Text(
@@ -116,6 +115,10 @@ fun ReportScreen(
 
                 MetricRow("Footfall", report.footfall.toString())
                 MetricRow("Conversions", report.conversions.toString())
+                MetricRow(
+                    "Conversion %",
+                    percent(report.conversionPercent)
+                )
 
                 HorizontalDivider()
 
@@ -137,14 +140,8 @@ fun ReportScreen(
                 )
 
                 MetricRow("AT", money(report.monthToDate.atSales))
-                MetricRow(
-                    "Kamiliant",
-                    money(report.monthToDate.kamSales)
-                )
-                MetricRow(
-                    "Total",
-                    money(report.monthToDate.totalSales)
-                )
+                MetricRow("Kamiliant", money(report.monthToDate.kamSales))
+                MetricRow("Total", money(report.monthToDate.totalSales))
                 MetricRow(
                     "Footfall",
                     report.monthToDate.footfall.toString()
@@ -155,11 +152,11 @@ fun ReportScreen(
                 )
                 MetricRow(
                     "Conversion %",
-                    String.format(
-                        java.util.Locale.US,
-                        "%.1f%%",
-                        report.monthToDate.conversionPercent
-                    )
+                    percent(report.monthToDate.conversionPercent)
+                )
+                MetricRow(
+                    "AOV",
+                    money(report.monthToDate.aov)
                 )
 
                 if (report.insights.isNotEmpty()) {
@@ -222,11 +219,21 @@ private fun MerchandiseSection(
 
     items.forEach { item ->
         Text(
-            text = "${item.model} • ${item.size} • " +
-                "${item.colour} • ${money(item.sellingPrice)}"
+            text = listOf(
+                item.model,
+                item.size,
+                item.colour,
+                money(item.sellingPrice)
+            )
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .joinToString(" • ")
         )
     }
 }
 
 private fun money(value: Long): String =
-    "₹$value"
+    String.format(Locale("en", "IN"), "%,d", value)
+
+private fun percent(value: Double): String =
+    String.format(Locale.US, "%.1f%%", value)
